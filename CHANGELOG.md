@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-08 — fix: monitor script aborted on fastboot's stderr
+
+- x04g-usb-monitor.ps1: Windows PowerShell 5.1 turned fastboot's stderr progress lines into a
+  terminating error (ErrorActionPreference=Stop), aborting right after "Sending". fastboot now
+  runs as a .NET process with both streams captured (tested with a stderr-writing stub).
+
 ## 2026-11-08 — USB-only debugging (no UART available)
 
 - Kernel: built-in legacy g_serial + U_SERIAL_CONSOLE (`console=ttyGS0`): kernel log on a Windows

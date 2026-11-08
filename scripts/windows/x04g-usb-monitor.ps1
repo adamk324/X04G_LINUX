@@ -68,8 +68,22 @@ if (-not $NoBoot) {
     if (-not $Image) { throw "-Image is required unless -NoBoot is given" }
     $Image = (Resolve-Path $Image).Path
     Write-Host "fastboot boot $Image" -ForegroundColor Cyan
-    $out = & $Fastboot boot $Image 2>&1 | Out-String
+    # fastboot prints progress on stderr. Run it as a .NET process so Windows PowerShell 5.1
+    # does not turn stderr lines into terminating errors under ErrorActionPreference=Stop.
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $Fastboot
+    $psi.Arguments = "boot `"$Image`""
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    $p = [System.Diagnostics.Process]::Start($psi)
+    $errTask = $p.StandardError.ReadToEndAsync()
+    $outText = $p.StandardOutput.ReadToEnd()
+    $p.WaitForExit()
+    $out = $outText + $errTask.Result
     $sw.Start()
+    if ($p.ExitCode -ne 0) { Write-Host "fastboot exit code $($p.ExitCode)" -ForegroundColor Red }
     Add-Content $log "fastboot output:`n$out"
     Write-Host $out
     if ($out -notmatch "Booting\s+OKAY") { Log "ERR" "fastboot did not report Booting OKAY" "Red" }
