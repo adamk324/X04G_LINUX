@@ -1,0 +1,115 @@
+name: kernel-build
+
+on:
+  push:
+    branches: [main, 'dev/**']
+    paths:
+      - 'kernel/**'
+      - 'configs/**'
+      - 'patches/kernel/**'
+      - 'scripts/linux/**'
+      - '.github/workflows/kernel-build.yml'
+  pull_request:
+    paths:
+      - 'kernel/**'
+      - 'configs/**'
+      - 'patches/kernel/**'
+      - 'scripts/linux/**'
+  workflow_dispatch:
+    inputs:
+      config_fragment:
+        description: 'Config fragment under configs/ (stable: x04g.config)'
+        default: 'x04g.config'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kernel-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Pinned runner image -> pinned distro cross toolchain (gcc 13.x on 24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      CONFIG_FRAGMENT: ${{ github.workspace }}/configs/${{ inputs.config_fragment || 'x04g.config' }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPILERCHECK: content
+      CCACHE_BASEDIR: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read pinned source
+        id: src
+        run: |
+          source kernel/source.env
+          echo "commit=$KERNEL_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "branch=$KERNEL_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "cfghash=${{ hashFiles('configs/**', 'patches/kernel/**') }}" >> "$GITHUB_OUTPUT"
+
+      - name: Install cross toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            flex bison bc libssl-dev libelf-dev device-tree-compiler cpio kmod ccache
+          aarch64-linux-gnu-gcc --version | head -1
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ steps.src.outputs.commit }}-${{ steps.src.outputs.cfghash }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ steps.src.outputs.commit }}-${{ steps.src.outputs.cfghash }}-
+            ccache-${{ steps.src.outputs.commit }}-
+            ccache-
+
+      - name: Fetch kernel source (pinned) and apply patches
+        run: scripts/linux/fetch-kernel.sh build/linux
+
+      - name: Build kernel, modules and DTB
+        env:
+          CROSS_COMPILE: "ccache aarch64-linux-gnu-"
+        run: |
+          scripts/linux/build-kernel.sh build/linux build/out
+          ccache -s
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### X04G kernel build"
+            echo '```'
+            cat build/artifacts/build-info.txt 2>/dev/null || echo "no build-info (build failed)"
+            echo '```'
+            grep -E '^WARN' build/artifacts/build.log 2>/dev/null | head -50 || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Name artifact
+        if: success()
+        id: name
+        run: |
+          KREL=$(grep '^kernel_release=' build/artifacts/build-info.txt | cut -d= -f2)
+          FRAG=$(basename "$CONFIG_FRAGMENT" .config)
+          echo "name=x04g-kernel-${KREL}-${FRAG}-${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.name }}
+          path: build/artifacts/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: x04g-kernel-build-log-${{ github.run_id }}
+          path: build/artifacts/build.log
+          retention-days: 7

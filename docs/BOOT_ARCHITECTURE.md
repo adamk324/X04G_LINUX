@@ -1,0 +1,56 @@
+# Boot architecture
+
+## Boot chain
+
+```
+BootROM (mask ROM, 0E8D:0003 if VOL+ held)
+  └─ Preloader         eMMC boot1 HW partition          (0E8D:2000 for ~2 s)
+      └─ ATF BL31 + OP-TEE   GPT: tee1 / tee2 (A/B copies)  [DOC/SRC: optee node + ATF reserved mem]
+          └─ LK (Little Kernel)   GPT: lk / lk2              (fastboot 0E8D:201C)
+              ├─ checks seccfg (lock state) + AVB (vbmeta, vbmeta_system, vbmeta_vendor)
+              └─ Android boot image   GPT: boot (normal) | recovery (key combo)
+                     kernel + ramdisk (+ dtb)  → Linux
+```
+
+Facts (community, unverified on your unit):
+
+- **VOL+ during plug-in** forces BootROM download mode → MTKClient has full eMMC read/write
+  regardless of lock state. This is the universal recovery path. [DOC: Informatic, Nura wiki]
+- Stock LK fastboot and fastbootd **do not accept unsigned payloads while locked**. [DOC: Informatic]
+- `mtk da seccfg unlock` unlocks the bootloader → "Orange State" warning at boot. [DOC]
+- After unlock, boot images repacked with magiskboot (stock header) boot fine **without touching
+  vbmeta**; images built with a generic Android layout reportedly did not boot. [DOC: Informatic]
+  → our `mkbootimg-from-stock.sh` clones every header field from *your* stock `boot.img`.
+- The x04g DTS keeps `console=tty0` + 921600 UART and a simple-framebuffer at `0x7f1c0000`
+  (LK leaves the panel initialised, 480×800 a8r8g8b8). [SRC]
+- lscorcia reports running postmarketOS with the **netboot** initramfs hook (rootfs over USB) on
+  the x04g (pmaports MR !8525/!8526). [DOC] — this is the recommended first-boot method: no rootfs
+  on eMMC needed.
+
+## Unknown — must be measured from your backup
+
+| Question | How we answer it |
+|---|---|
+| boot.img header version (0/1/2), base, offsets, page size | `unpack_bootimg --boot_img boot.bin` in WSL |
+| Kernel format LK expects (Image.gz, Image.gz + appended DTB, separate DTB section) | `mkbootimg-from-stock.sh` auto-detects from stock image |
+| Does LK use the DTB from boot.img or from `dtbo`/its own? | inspect stock image + UART log |
+| Does unlocked LK support `fastboot boot` (RAM boot, no flash)? | test (step 1 below) |
+| Does LK rewrite `/memory` (512 MiB DT vs 1 GiB RAM)? | `/proc/meminfo` after first boot |
+| Exact seccfg/AVB behaviour of your firmware version | identify step + UART log |
+
+## Boot strategy, least destructive first
+
+1. **RAM boot via LK fastboot** — `fastboot boot x04g-linux-boot.img`. Writes nothing.
+   Requires unlocked seccfg (seccfg is a small write — needs your approval, see RECOVERY.md).
+2. **Flash to `recovery` only**, keep `boot` = stock Android. Linux is started with the recovery
+   key combo, Android still boots normally. Restorable from backup in one MTKClient command.
+3. Flash to `boot` (Linux default) — only after 1 or 2 works.
+
+The kernel's rootfs comes first from the pmOS netboot hook (USB), later from an eMMC partition
+(candidates: `cache` or `userdata` — repurposing either requires your approval).
+
+## UART
+
+TP30 = TX, TP29 = RX, **1.8 V logic** (a 3.3 V adapter can damage the SoC — use a 1.8 V-capable
+adapter or a level shifter), 921600 8N1. Strongly recommended before the first Linux boot: it is
+the only way to see LK and early kernel messages if the screen stays black.

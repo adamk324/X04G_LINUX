@@ -1,0 +1,9 @@
+/build/
+/artifacts/*
+!/artifacts/README.md
+*.img
+*.bin
+!/rootfs/**/*.bin
+__pycache__/
+/backups/
+/tools/
