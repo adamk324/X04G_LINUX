@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-08 — probe results: 32-bit handover works, 64-bit switch is the problem
+
+- P1/P2 reset at 2.8 s (LK runs our image, mainline DT fine); P0 stock reset at 6.5 s;
+  P3 (smc 0x82000200, zimage64's call) hung until the ~62 s watchdog.
+- lk.bin: LK's 64-bit jump is smc 0x82000115 (r1 entry, r2 DT, r3 0, r4 1).
+- New probes P4/P4b (0x82000115 with r3 = 0 / non-zero) and P5 (native 64N2 path, gzip'd
+  arm64 reset stub).
+
 ## 2026-11-08 — T7 result, LK probes
 
 - T7 (zimage64, CI-built) on hardware: no USB, reset at 62.6 s — identical to native64 runs.

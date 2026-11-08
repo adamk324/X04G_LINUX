@@ -9,6 +9,20 @@
 | 2026-11-08 | `x04g-T6-initcalls.img` / T5 (adce887) | Screen keeps LK's "USB Transmission OK" (photo), no kernel text even with simpledrm + initcall_debug; no USB; preloader at 62.9 s, LK fastboot at 83.7 s. Reset time identical to T4 regardless of cmdline/drivers → the kernel most likely never executes in LK's native 64-bit path. |
 | 2026-11-08 | `x04g-T4-usbdiag.img` (3ca372f) via `x04g-usb-monitor.ps1` | Booting OKAY at t=0; **no USB device at all** (kernel-stage g_serial 0525:A4A7 never enumerated); preloader at 63.2 s (reset); LK fastboot at 82.7 s, later continued to Android. → kernel did not get the MUSB controller up; suspected early hang. Suspect: CONFIG_OPTEE=y (not in lscorcia's config) and other drivers that touch secure-world resources on stock firmware. |
 
+## LK probe results (2026-11-08, reset time after Booting OKAY)
+
+| Probe | Reset | Conclusion |
+|---|---|---|
+| P0 stock boot.img | 6.5 s, then LK fastboot | LK starts the stock kernel via `fastboot boot`; Android itself then reboots |
+| P1 32-bit stub, our DT | **2.8 s** | LK jumps into our image and accepts the mainline DT |
+| P2 32-bit stub, stock DT | 2.8 s | DT makes no difference |
+| P3 smc 0x82000200 → AArch64 | 62.6 s | zimage64's SiP call is not this ATF's 64-bit switch |
+
+From lk.bin: LK's own 64-bit jump (`boot_linux` → 0x56019c04 → 0x560174c0) is
+`smc 0x82000115` with r1 = kernel entry, r2 = DT, r3 = 0, r4 = 1, followed by `b .`.
+Next probes: P4 (0x82000115, r3 = 0), P4b (0x82000115, r3 non-zero), P5 (gzip'd arm64 stub via
+LK's native 64N2 path).
+
 ## LK probes (P0–P3): does LK hand over control at all?
 
 Tiny payloads whose only job is to reset the board immediately (PSCI SYSTEM_RESET), so the
