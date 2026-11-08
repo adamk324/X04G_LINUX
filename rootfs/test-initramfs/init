@@ -25,6 +25,13 @@ mount -t pstore pstore /sys/fs/pstore 2>/dev/null
 say() { echo "[x04g-init] $*" > /dev/kmsg; echo "[x04g-init] $*"; }
 say "X04G diagnostic initramfs starting ($(uname -r))"
 
+# LK leaves the SoC hardware watchdog running (~20 s). Feed it from userspace as well, in case
+# the kernel's own boot-time pinging is not active.
+for w in /dev/watchdog0 /dev/watchdog; do
+    if [ -e "$w" ]; then watchdog -T 30 -t 5 "$w" && say "feeding $w"; break; fi
+done
+[ -e /dev/watchdog0 ] || say "no /dev/watchdog0 - hardware watchdog not handled by Linux"
+
 # Show the log on the panel even if fbcon picked another console
 echo 7 > /proc/sys/kernel/printk 2>/dev/null
 

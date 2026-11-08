@@ -1,5 +1,25 @@
 # First Linux boot — RAM only (`fastboot boot`)
 
+## Hardware results so far
+
+| Date | Image | Result |
+|---|---|---|
+| 2026-11-08 | `x04g-diag-boot.img` (c38b74f) | `fastboot boot`: Sending OKAY, **Booting OKAY**. Screen kept LK's "USB Transmission OK" text, then after ~20 s the clock reset into stock Android. No kernel output on screen. → LK accepted and jumped; kernel hung early, or ran without screen and without feeding LK's watchdog. Undetermined without UART. |
+
+## Timing tests (no UART needed)
+
+Start a stopwatch when `fastboot` prints `Booting OKAY`, stop when the Mi logo appears.
+
+| Image | cmdline extras | init |
+|---|---|---|
+| `x04g-T1-canary.img` | `panic=3` | sleep 8 s, `reboot -f` |
+| `x04g-T2-canary-safe.img` | `panic=3 maxcpus=1 clk_ignore_unused pd_ignore_unused` | same |
+| `x04g-T3-diag-safe.img` | `panic=3 clk_ignore_unused pd_ignore_unused` | diagnostic init + feeds `/dev/watchdog0` |
+
+Reading: **~9–13 s** = userspace ran · **~3–6 s** = kernel panic · **~20 s** = early hang
+(LK watchdog). QEMU reference for T1: userspace at 1.0 s, reboot at 9.0 s (emulated).
+
+
 Nothing is written to the clock. The image lives in RAM; unplugging the clock returns it to
 stock Android exactly as before.
 

@@ -21,8 +21,11 @@ Legend: **source** = checked by reading source code · **built** = compiled succ
 
 ## Hardware tests
 
-None of our builds have run on the device yet. Stock-firmware measurements are in
-HARDWARE_RESEARCH §7.
+| Date | Test | Result |
+|---|---|---|
+| 2026-11-08 | `fastboot boot x04g-diag-boot.img` | LK: Booting OKAY; no kernel output on screen; watchdog-style reset to Android after ~20 s. Next: timing tests T1–T3 (FIRST_BOOT.md) |
+
+Stock-firmware measurements are in HARDWARE_RESEARCH §7.
 
 ## Next steps
 

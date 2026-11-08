@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-08 — first hardware boot attempt
+
+- `fastboot boot x04g-diag-boot.img`: LK accepted (Booting OKAY), no kernel output on screen,
+  reset to Android after ~20 s.
+- LK `cmd_boot` analysed: address checks pass, kernel inflated from the download buffer,
+  dconfig overlay check is a stub that always succeeds.
+- Timing canary initramfs (`canary-init`) and three RAM-boot test images (T1–T3) to locate the
+  hang without UART; diagnostic init now feeds /dev/watchdog0.
+
 ## 2026-11-08 — first boot image (RAM boot), LK analysed
 
 - backup-x04g-adb.ps1: the user's run showed every LF expanded to CRLF (su behind a tty). Script

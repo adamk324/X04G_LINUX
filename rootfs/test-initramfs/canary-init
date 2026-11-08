@@ -1,0 +1,17 @@
+#!/bin/sh
+# Timing canary: proves the kernel reached userspace without needing a screen or UART.
+# It waits 8 s and then reboots. Measure the time from "fastboot boot ... Booting OKAY" until
+# the Mi logo returns:
+#   ~9-11 s  -> kernel + initramfs + busybox all ran
+#   ~3-5 s   -> kernel panic (cmdline panic=3)
+#   ~20 s    -> kernel hung before userspace (LK's hardware watchdog fired)
+# Never touches eMMC.
+export PATH=/bin
+mount -t proc proc /proc 2>/dev/null
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+echo "[x04g-canary] userspace reached, rebooting in 8 s" > /dev/kmsg 2>/dev/null
+echo "[x04g-canary] userspace reached, rebooting in 8 s" > /dev/tty0 2>/dev/null
+sleep 8
+reboot -f
+# If reboot returns, spin (the hardware watchdog will reset the board)
+while true; do sleep 1; done

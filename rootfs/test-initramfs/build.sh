@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build the X04G diagnostic initramfs (gzip cpio).
 # Usage: rootfs/test-initramfs/build.sh <busybox-aarch64-static> <modules-*.tar.gz> <out.cpio.gz>
+# Env:   INIT=<path>  init script to install as /init (default: ./init; ./canary-init = timing canary)
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BB="$1"; MODTAR="$2"; OUT="$3"
@@ -14,7 +15,7 @@ for a in sh ash mount umount mkdir ls cat echo sleep insmod rmmod lsmod dmesg un
          hexdump od xxd sha256sum md5sum dd ln cp mv rm touch chmod reboot poweroff halt \
          vi less more find stat date env sync kill killall true false test '[' '[[' printf \
          readlink basename dirname seq usleep watch netstat route ping hwclock i2cdetect \
-         i2cget i2cdump devmem sysctl blockdev; do
+         i2cget i2cdump devmem sysctl blockdev watchdog; do
     ln -sf busybox "$R/bin/$a"
 done
 # Modules useful for first hardware checks (built as =m in configs/x04g.config)
@@ -23,7 +24,7 @@ for m in edt-ft5x06.ko em3071x.ko; do
     f="$(find "$WORK/lib/modules" -name "$m" | head -n1)"
     [ -n "$f" ] && cp "$f" "$R/lib/modules/"
 done
-install -m 0755 "$HERE/init" "$R/init"
+install -m 0755 "${INIT:-$HERE/init}" "$R/init"
 mknod -m 600 "$R/dev/console" c 5 1 2>/dev/null || true
 (cd "$R" && find . -print0 | LC_ALL=C sort -z | \
     cpio --null -o -H newc --owner=0:0 --reproducible --quiet) | gzip -9n > "$OUT"
