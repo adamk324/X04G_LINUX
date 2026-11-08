@@ -4,6 +4,7 @@ Subject: [PATCH] x04g: debug boot checkpoints with PSCI reset (bring-up aid, no 
 When checkpoint N is reached and x04g_ckpt_cfg.reset_at == N, reset the board via
 PSCI SYSTEM_RESET. reset_at is 0 by default (no effect); test images patch it in the
 Image (magic "X04GCKPT"). Lets the reset time over USB show how far boot got.
+Checkpoints: 1..25 = boot stages, 10000*level + index = before each initcall.
 ---
 diff --git a/arch/arm64/kernel/setup.c b/arch/arm64/kernel/setup.c
 index 29c6100f0c..6097c5346f 100644
@@ -54,7 +55,7 @@ index 29c6100f0c..6097c5346f 100644
  	bootmem_init();
  
 diff --git a/init/main.c b/init/main.c
-index 31f2bf5497..20dbf9c211 100644
+index 31f2bf5497..65bf16f9f6 100644
 --- a/init/main.c
 +++ b/init/main.c
 @@ -26,6 +26,7 @@
@@ -162,7 +163,19 @@ index 31f2bf5497..20dbf9c211 100644
  static void __init do_initcall_level(int level, char *command_line)
  {
  	initcall_entry_t *fn;
-@@ -1437,6 +1471,7 @@ static void __init do_initcalls(void)
+@@ -1420,8 +1454,10 @@ static void __init do_initcall_level(int level, char *command_line)
+ 		   NULL, ignore_unknown_bootoption);
+ 
+ 	do_trace_initcall_level(initcall_level_names[level]);
+-	for (fn = initcall_levels[level]; fn < initcall_levels[level+1]; fn++)
++	for (fn = initcall_levels[level]; fn < initcall_levels[level+1]; fn++) {
++		x04g_ckpt(10000 * level + (fn - initcall_levels[level]));	/* per-initcall checkpoint */
+ 		do_one_initcall(initcall_from_entry(fn));
++	}
+ }
+ 
+ static void __init do_initcalls(void)
+@@ -1437,6 +1473,7 @@ static void __init do_initcalls(void)
  	for (level = 0; level < ARRAY_SIZE(initcall_levels) - 1; level++) {
  		/* Parser modifies command_line, restore it each time */
  		strcpy(command_line, saved_command_line);
@@ -170,7 +183,7 @@ index 31f2bf5497..20dbf9c211 100644
  		do_initcall_level(level, command_line);
  	}
  
-@@ -1555,6 +1590,7 @@ static int __ref kernel_init(void *unused)
+@@ -1555,6 +1592,7 @@ static int __ref kernel_init(void *unused)
  {
  	int ret;
  
@@ -178,7 +191,7 @@ index 31f2bf5497..20dbf9c211 100644
  	init_userspace_fs();
  
  	/*
-@@ -1588,6 +1624,7 @@ static int __ref kernel_init(void *unused)
+@@ -1588,6 +1626,7 @@ static int __ref kernel_init(void *unused)
  	do_sysctl_args();
  
  	if (ramdisk_execute_command) {
@@ -186,7 +199,7 @@ index 31f2bf5497..20dbf9c211 100644
  		ret = run_init_process(ramdisk_execute_command);
  		if (!ret)
  			return 0;
-@@ -1665,6 +1702,7 @@ static noinline void __init kernel_init_freeable(void)
+@@ -1665,6 +1704,7 @@ static noinline void __init kernel_init_freeable(void)
  	lockup_detector_init();
  
  	smp_init();
@@ -194,7 +207,7 @@ index 31f2bf5497..20dbf9c211 100644
  	sched_init_smp();
  
  	workqueue_init_topology();
-@@ -1673,6 +1711,7 @@ static noinline void __init kernel_init_freeable(void)
+@@ -1673,6 +1713,7 @@ static noinline void __init kernel_init_freeable(void)
  	page_alloc_init_late();
  
  	do_basic_setup();

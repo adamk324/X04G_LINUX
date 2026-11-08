@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-08 — checkpoint batch 1: hang is in initcall level 6/7
+
+- C00…C22 reset in ~3 s (reached); C24/C25 hit the ~62.8 s watchdog. The kernel boots through
+  early setup, SMP and initcall levels 0–5, and hangs in device_initcall (6) or late_initcall (7).
+- Patch 0002: checkpoint 10000*level + index before every initcall; initcall-map.py maps
+  indices to function names. Bisection batch: L6 every 36 initcalls + C23 + L7#48.
+
 ## 2026-11-08 — LK path fully proven; kernel boot checkpoints
 
 - P4/P4b (smc 0x82000115) and P5 (LK native 64N2 path, gzip'd stub) all reset in ~2.7 s:
