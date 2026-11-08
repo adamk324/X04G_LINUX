@@ -1,0 +1,70 @@
+From c9e16eaf39d4569ca0b60707a585108f62a687dd Mon Sep 17 00:00:00 2001
+From: X04G_LINUX <noreply@anthropic.com>
+Date: Sun, 8 Nov 2026 17:20:36 +0100
+Subject: [PATCH] arm64: dts: mt8167-xiaomi-x04g: describe 1 GiB RAM and
+ firmware-owned memory
+
+The board carries 2x Samsung K4B4G1646E (4 Gbit DDR3) = 1 GiB, and the stock
+Android kernel on an X04G unit reports System RAM from 0x40000000 up to
+0x7f2bffff (MemTotal 1003772 kB), while the DT only declared 512 MiB.
+
+Declare the full 1 GiB and reserve the regions the stock firmware keeps out
+of System RAM:
+ - 0x54400000-0x544fffff: stock persistent_ram, reused as ramoops (pstore)
+ - 0x7f000000-0x7fffffff: LK / boot framebuffer (contains simple-framebuffer
+   at 0x7f1c0000)
+ATF at 0x54600000 was already reserved.
+
+Values measured from /proc/iomem and /proc/meminfo of the stock firmware.
+---
+ .../boot/dts/mediatek/mt8167-xiaomi-x04g.dts  | 25 ++++++++++++++++++-
+ 1 file changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt8167-xiaomi-x04g.dts b/arch/arm64/boot/dts/mediatek/mt8167-xiaomi-x04g.dts
+index 169a8314d..50f2b87da 100644
+--- a/arch/arm64/boot/dts/mediatek/mt8167-xiaomi-x04g.dts
++++ b/arch/arm64/boot/dts/mediatek/mt8167-xiaomi-x04g.dts
+@@ -41,9 +41,10 @@ extcon_usb: extcon_iddig {
+ 		id-gpios = <&pio 41 GPIO_ACTIVE_HIGH>;
+ 	};
+ 
++	/* 2x 4 Gbit DDR3 = 1 GiB; stock Android reports System RAM up to 0x7f2bffff */
+ 	memory@40000000 {
+ 		device_type = "memory";
+-		reg = <0 0x40000000 0 0x20000000>;
++		reg = <0 0x40000000 0 0x40000000>;
+ 	};
+ 
+ 	reserved-memory {
+@@ -56,6 +57,28 @@ atf-reserved-memory {
+ 			no-map;
+ 		};
+ 
++		/*
++		 * Firmware-owned holes in the stock /proc/iomem of an X04G unit:
++		 * 0x54400000-0x544fffff is the stock kernel's persistent_ram area,
++		 * reused here for pstore/ramoops so a crashed boot leaves a log
++		 * readable after a warm reboot (/sys/fs/pstore).
++		 */
++		ramoops@54400000 {
++			compatible = "ramoops";
++			reg = <0x00 0x54400000 0x00 0x100000>;
++			record-size = <0x20000>;
++			console-size = <0x40000>;
++			ftrace-size = <0x0>;
++			pmsg-size = <0x20000>;
++			no-map;
++		};
++
++		/* 0x7f000000-0x7fffffff: not System RAM under stock (LK, framebuffer) */
++		lk-framebuffer-memory@7f000000 {
++			reg = <0x00 0x7f000000 0x00 0x1000000>;
++			no-map;
++		};
++
+ 		consys-reserve-memory {
+ 			size = <0x00 0x200000>;
+ 			alignment = <0x00 0x200000>;
+-- 
+2.43.0
+

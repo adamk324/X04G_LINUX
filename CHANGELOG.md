@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-08 — facts from the user's unit (stock Android over ADB)
+
+- Unit is already bootloader-unlocked (orange); stock kernel is 32-bit (`bootopt=64S3,32N2,32N2`).
+- mkbootimg-from-stock.sh: force `bootopt=…,64N2`, load arm64 kernel at 0x40080000, default
+  payload Image.gz-dtb, refuse ramdisk/DTB placement on firmware RAM.
+- patches/kernel/0001: X04G DT declares 1 GiB, reserves persistent_ram (as ramoops) and the
+  LK/framebuffer area 0x7f000000 +16 MiB. Built; DTB checked with fdtget. Not booted.
+- configs: PSTORE / PSTORE_RAM / PSTORE_CONSOLE / PSTORE_PMSG.
+- scripts/windows/backup-x04g-adb.ps1: read-only ADB backup with device-side SHA-256 check
+  (syntax-checked with pwsh 7.4; binary capture tested with a fake adb).
+
 ## 2026-11-08 — first successful kernel build
 
 - First green GitHub Actions run (#2, run id 42495456144); artifact uploaded.

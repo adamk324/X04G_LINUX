@@ -38,6 +38,17 @@ python mtk.py rl partitions --noreconnect
 python mtk.py rf emmc_user_full.bin --noreconnect
 ```
 
+### Faster alternative while Android + root work (no BootROM mode)
+
+```powershell
+.\scripts\windows\backup-x04g-adb.ps1              # every partition except userdata, plus eMMC boot0/boot1
+.\scripts\windows\backup-x04g-adb.ps1 -Only boot,lk,lk2,dtbo,vbmeta,recovery   # just what the port needs now
+```
+
+It streams each partition with `adb exec-out` and compares the PC file against a SHA-256 computed
+on the clock. It is read-only. Partitions that Android has mounted read-write are read live, so
+**the MTKClient full backup stays the restore source** before anything is written.
+
 Backups contain device-unique IDs (serial, MACs) and proprietary firmware: **never commit or
 publish them.** `backups/` is git-ignored.
 
@@ -60,7 +71,7 @@ confirm BootROM access works during the identify step before relying on it.
 
 | Operation | Effect | Reversible via |
 |---|---|---|
-| `mtk da seccfg unlock` | writes `seccfg`; Orange State | restore `seccfg.bin` |
+| `mtk da seccfg unlock` | writes `seccfg`; Orange State | **not needed — your unit is already unlocked** |
 | `mtk e metadata,userdata,md_udc` (in x04g_tools guide) | **erases user data** | restore partitions — not needed for Linux RAM boot, we skip it |
 | writing `recovery` / `boot` | replaces Android boot images | restore `.bin` |
 | any write to `preloader`, `lk`, `tee*`, GPT | can stop the device from reaching LK | BootROM + full backup only |

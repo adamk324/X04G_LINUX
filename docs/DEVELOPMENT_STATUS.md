@@ -8,7 +8,7 @@ Legend: **source** = checked by reading source code · **built** = compiled succ
 | 1 Research | done (source/docs level): see HARDWARE_RESEARCH, BOOT_ARCHITECTURE, KERNEL_DEVELOPMENT, DISTRO_SELECTION |
 | 2 Dev environment | scripts + CI workflow written; repo pushed to GitHub; local cloud build OK; GitHub Actions verified (run #2 green, artifact uploaded) |
 | 3 Kernel compilation | done: reproducible build locally and in CI (built, not booted) |
-| 4 Device preparation | **blocked on you:** run the read-only backup (RECOVERY.md) |
+| 4 Device preparation | unit facts measured over ADB (unlocked, 32-bit stock kernel, 1 GiB, memory map); **backup still needed** |
 | 5–8 | not started |
 
 ## Build results
@@ -20,7 +20,8 @@ Legend: **source** = checked by reading source code · **built** = compiled succ
 
 ## Hardware tests
 
-None yet.
+None of our builds have run on the device yet. Stock-firmware measurements are in
+HARDWARE_RESEARCH §7.
 
 ## Next steps
 

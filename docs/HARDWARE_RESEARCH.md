@@ -1,7 +1,7 @@
 # Hardware research — Xiaomi Mi Smart Clock (X04G / LX04)
 
 Status legend:
-**[DEV]** confirmed on *your* unit (none yet — needs `backup-x04g.ps1 -Step identify` + Linux boot) ·
+**[DEV]** confirmed on *your* unit (stock Android over ADB, 2026-11-08 — see §7) ·
 **[SRC]** confirmed from kernel source / device tree that someone booted ·
 **[DOC]** stated by community research (teardown, wiki) · **[?]** unverified / conflicting.
 
@@ -24,7 +24,8 @@ versions — **the layout below is from one X04G; yours must be read with `print
 | CPU | 4× Cortex-A35, single cluster | [SRC] | `mt8516.dtsi` |
 | Max clock | 1.5 GHz @ 1.30 V OPP added for x04g | [SRC] | commit `9a57d7ad889` |
 | RAM | 2× Samsung **K4B4G1646E-BYMA** (4 Gbit DDR3 each) = **1 GiB** | [DOC] | Informatic teardown |
-| DT memory node | `reg = <0 0x40000000 0 0x20000000>` = **512 MiB** | [SRC] **[?]** | x04g DTS — conflicts with 1 GiB; MTK LK normally rewrites `/memory` at boot. Must check `/proc/meminfo` on first boot. |
+| RAM seen by stock kernel | MemTotal 1 003 772 kB; System RAM 0x40000000–0x7f2bffff with holes | **[DEV]** | `/proc/meminfo`, `/proc/iomem` |
+| DT memory node | upstream x04g DTS declares only 512 MiB; **fixed by `patches/kernel/0001`** (1 GiB + firmware reservations) | [SRC] | needs hardware confirmation |
 | Reserved | ATF @ `0x54600000` (0x30000), CONSYS 2 MiB, OP-TEE node | [SRC] | DTS |
 | eMMC | Kioxia **THGBMNG5D1LBAIL** 4 GB, 8-bit, HS200 | [DOC]+[SRC] | teardown; `&mmc0` |
 | PMIC | MediaTek **MT6392** (via PWRAP) | [SRC] | DTS |
@@ -63,6 +64,25 @@ versions — **the layout below is from one X04G; yours must be read with `print
 Device-unique data: `proinfo`, `nvram`, `nvdata`, `persist` (serial, Wi-Fi/BT MAC, calibration).
 Preloader lives in the eMMC **boot1** hardware partition, not in the GPT.
 
+## 7. Measured on your unit (stock Android, root over ADB, 2026-11-08) [DEV]
+
+| Fact | Value | Consequence |
+|---|---|---|
+| Lock state | `androidboot.vbmeta.device_state=unlocked`, `verifiedbootstate=orange` | **seccfg is already unlocked** — no unlock write needed |
+| CPU mode handed to kernel | `bootopt=64S3,32N2,32N2` | stock kernel is **32-bit ARM** (also visible: HighTotal/LowTotal, `c0…` addresses); our arm64 image must use `…,64N2` |
+| Stock kernel load address | `Kernel code 40008000-40dfffff` | 32-bit zImage convention; arm64 image is placed at `0x40080000` |
+| RAM | 1 GiB total, firmware holes below | DT patch 0001 |
+| `0x54400000–0x544fffff` | `persistent_ram` (stock pstore) | reserved, reused as ramoops |
+| `0x54600000–0x5462ffff` | not RAM (ATF) | matches DTS `atf-reserved-memory` |
+| `0x7f000000–0x7f1fffff`, `0x7f2c0000–0x7fffffff` | not RAM (LK / boot framebuffer) | reserved `0x7f000000` +16 MiB |
+| eMMC controller | `soc/11120000.mmc` (`mmcblk0`) | matches `&mmc0` |
+| Other MMIO seen | I2C @ 11009000/1100a000/1100b000, AFE @ 11140000, USB @ 11100000 + 11190000, `mt6392-typec` | consistent with mt8167.dtsi |
+| Wi-Fi | stock module `wlan_drv_gen2` + `mtk_wmtd_worker` (CONSYS gen2) | matches the out-of-tree consys driver family |
+| DTB selection | `androidboot.dtb_idx=0 androidboot.dtbo_idx=0` | LK picks DTB index 0 from the image |
+| Console | `console=ttyS0,921600n1 earlycon=uart8250,mmio32,0x11005000`, `printk.disable_uart=1` | UART exists at 921600; stock silences it |
+
+The serial number also appears on the cmdline; it is intentionally not recorded in this repo.
+
 ## 6. Physical device — to be confirmed by you
 
 Run `scripts\windows\backup-x04g.ps1 -Step identify` and commit the (non-secret) parts:
@@ -71,5 +91,5 @@ Run `scripts\windows\backup-x04g.ps1 -Step identify` and commit the (non-secret)
 - [ ] SBC / SLA / DAA flags (`gettargetconfig`) — decides whether BootROM exploit or stock DA is needed
 - [ ] GPT names + sizes (compare with §5)
 - [ ] Android build string (recovery screen) — X04G or LX04 firmware
-- [ ] seccfg lock state
-- [ ] RAM size seen by Linux (512 MiB vs 1 GiB question)
+- [x] seccfg lock state — unlocked/orange (§7)
+- [x] RAM size — 1 GiB (§7); mainline value pending first boot
