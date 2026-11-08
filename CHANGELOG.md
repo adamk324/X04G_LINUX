@@ -2,6 +2,9 @@
 
 ## 2026-11-08 — first successful kernel build
 
+- First green GitHub Actions run (#2, run id 42495456144); artifact uploaded.
+- kernel-build.yml: concurrency group now includes the event, so a manual dispatch no longer cancels the push run.
+
 - First kernel build `7.3.0-x04g` succeeded (cloud session, gcc 13.3.0). Built only, not booted.
 - build-kernel.sh: fixed a silent exit (gzip SIGPIPE under pipefail) in the Image magic check;
   empty LOCALVERSION so the release has no `+`; stale module tarballs are removed.

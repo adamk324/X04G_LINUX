@@ -26,7 +26,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: kernel-build-${{ github.ref }}
+  group: kernel-build-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
