@@ -50,6 +50,35 @@ function Save-AdbStream([string]$Arguments, [string]$OutFile) {
     if ($proc.ExitCode -ne 0) { throw "adb $Arguments exited $($proc.ExitCode)" }
 }
 
+# On the user's unit (Magisk su, 2026-11-08) the stream comes back with every 0x0A expanded
+# to 0x0D 0x0A: the su session runs behind a terminal with ONLCR output translation. The
+# mapping is reversible (each original LF gained exactly one CR), so when the raw copy does
+# not match the device hash we undo it and verify again. Nothing is trusted without a match.
+Add-Type -TypeDefinition @"
+using System.IO;
+public static class X04gOnlcr {
+    public static void Undo(string inPath, string outPath) {
+        using (var i = File.OpenRead(inPath))
+        using (var o = new BufferedStream(File.Create(outPath), 1 << 20)) {
+            var buf = new byte[1 << 20]; int n; bool pendingCr = false;
+            while ((n = i.Read(buf, 0, buf.Length)) > 0) {
+                for (int k = 0; k < n; k++) {
+                    byte b = buf[k];
+                    if (pendingCr) {
+                        pendingCr = false;
+                        if (b == 10) { o.WriteByte(10); continue; }
+                        o.WriteByte(13);
+                    }
+                    if (b == 13) { pendingCr = true; continue; }
+                    o.WriteByte(b);
+                }
+            }
+            if (pendingCr) o.WriteByte(13);
+        }
+    }
+}
+"@
+
 & $Adb get-state | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "No ADB device" }
 if ((Su "id -u") -ne "0") { throw "su did not give uid 0" }
@@ -90,10 +119,19 @@ foreach ($it in $items) {
     Save-AdbStream "exec-out su -c `"cat $($it.Dev)`"" $it.Out
     $devHash = ((Su "sha256sum $($it.Dev)") -split "\s+")[0].ToLower()
     $pcHash = (Get-FileHash $it.Out -Algorithm SHA256).Hash.ToLower()
+    $note = "OK"
+    if ($devHash -ne $pcHash) {
+        $raw = "$($it.Out).crlf"
+        Move-Item -Force $it.Out $raw
+        [X04gOnlcr]::Undo($raw, $it.Out)
+        $pcHash = (Get-FileHash $it.Out -Algorithm SHA256).Hash.ToLower()
+        if ($devHash -eq $pcHash) { Remove-Item $raw; $note = "OK (undid tty LF->CRLF)" }
+        else { Move-Item -Force $raw $it.Out; $note = "HASH MISMATCH (device $devHash)" }
+    }
     $size = (Get-Item $it.Out).Length
     $ok = $devHash -eq $pcHash
     if (-not $ok) { $bad++ }
-    Write-Host ("{0,12:N0} bytes  {1}" -f $size, ($(if ($ok) { "OK" } else { "HASH MISMATCH (device $devHash)" })))
+    Write-Host ("{0,12:N0} bytes  {1}" -f $size, $note)
     "{0}  {1}  {2}" -f $pcHash, $size, $it.Out.Substring($dir.Length + 1) | Add-Content $manifest
 }
 if ($bad) { throw "$bad image(s) differ from the device - backup NOT verified" }

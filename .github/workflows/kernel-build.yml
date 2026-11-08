@@ -8,6 +8,7 @@ on:
       - 'configs/**'
       - 'patches/kernel/**'
       - 'scripts/linux/**'
+      - 'rootfs/test-initramfs/**'
       - '.github/workflows/kernel-build.yml'
   pull_request:
     paths:
@@ -15,6 +16,7 @@ on:
       - 'configs/**'
       - 'patches/kernel/**'
       - 'scripts/linux/**'
+      - 'rootfs/test-initramfs/**'
   workflow_dispatch:
     inputs:
       config_fragment:
@@ -77,6 +79,25 @@ jobs:
         run: |
           scripts/linux/build-kernel.sh build/linux build/out
           ccache -s
+
+      - name: Build diagnostic initramfs (busybox, test-only)
+        run: |
+          scripts/linux/build-busybox.sh build/busybox-out
+          KREL=$(grep '^kernel_release=' build/artifacts/build-info.txt | cut -d= -f2)
+          rootfs/test-initramfs/build.sh build/busybox-out/busybox \
+            "build/artifacts/modules-${KREL}.tar.gz" build/artifacts/x04g-diag-initramfs.cpio.gz
+          (cd build/artifacts && sha256sum x04g-diag-initramfs.cpio.gz >> SHA256SUMS)
+
+      - name: Smoke-boot kernel + initramfs in QEMU (emulated, not hardware)
+        run: |
+          sudo apt-get install -y -qq qemu-system-arm >/dev/null
+          gzip -dc build/artifacts/boot/Image.gz > build/Image
+          timeout 120 qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 4 -m 1024 -nographic \
+            -no-reboot -kernel build/Image -initrd build/artifacts/x04g-diag-initramfs.cpio.gz \
+            -append "console=ttyAMA0 panic=-1" > build/artifacts/qemu-smoke.log 2>&1 || true
+          grep -q "report written to /run/x04g-report.txt" build/artifacts/qemu-smoke.log
+          ! grep -q "Kernel panic" build/artifacts/qemu-smoke.log
+          echo "QEMU smoke boot OK (init ran, PID 1 alive)"
 
       - name: Job summary
         if: always()

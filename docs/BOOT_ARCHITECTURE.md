@@ -42,6 +42,29 @@ Facts (community, unverified on your unit):
   header is v2), because the stock 32-bit kernel's format does not tell us what the 64-bit LK path
   wants. `KERNEL_FORMAT=gzip|raw` overrides it if a boot test shows otherwise.
 
+## Stock LK analysis (your `lk.bin`, sha256 7915041207940…, build `mico_x04g-451d69f-20210619014509-20211214131701`)
+
+Static analysis of the 32-bit Thumb-2 LK (MTK header `0x58881688`, load address `0x56000000`,
+`app/mt_boot/mt_boot.c`). Addresses are LK virtual addresses.
+
+| Finding | Evidence |
+|---|---|
+| `bootopt=` is searched in the first 490 chars of the **boot image cmdline**; the kernel field is compared at offset 18: `"64"` → 64-bit flag, `"32"` → 32-bit | parser at `0x560310b0`; strings `"64"`/`"32"` at `0x56055c08`/`0x56052cfc`; flag at `0x56066cc4`; "Warning! No bootopt info!" otherwise |
+| 64-bit path requires `kernel_addr & 0x7FFFF == 0` (512 KiB aligned), else panic "64 bit kernel can't boot at 0x%08x" | `ubfx r3, r8, #0, #0x13` at `0x56019ea0` |
+| 64-bit path always calls `decompress_kernel(src, kernel_addr, size, 0xC800000)` → **gzip** (checks deflate method 8 + gzip flags; "gzip header is not correct") with a 200 MB output limit | `0x5601a04a`, `0x5601c528`, `0x5601c4a8` |
+| Header v2: DTB taken from the v2 DTB section ("mkdtimg format" or "fdt format only"); otherwise LK scans backwards from the kernel end for an appended FDT | `bldr_load_dtb` around `0x5601e700` |
+| LK rewrites `/memory` from its mblock table ("PASS memory DTS node") and copies the DTB to the tags address | `0x56019fb4`… |
+| LK applies dtbo / "dconfig" overlays; failure path prints "dconfig DT overlay failed, system not bootable" | `0x5601a06a` — mainline DTB has no `__symbols__`; lscorcia boots mainline with this LK family, so assumed non-fatal **[?]** |
+| Fastboot commands: `getvar download flash erase continue reboot* boot flashing (un)lock oem …` — **`boot` (RAM boot) exists** | registration list in `fastboot_init` (`0x5601cd64`–`0x5601cfe0`) |
+
+Stock boot.img (sha256 cadd9bc1…): header **v2**, page 2048, kernel `0x40008000` (32-bit zImage
+with appended DTB), ramdisk `0x55000000`, tags/DTB `0x54000000`, cmdline
+`bootopt=64S3,32N2,32N2 buildvariant=user`, v2 DTB section = 64-byte table + one FDT.
+
+Our image keeps those offsets except kernel → `0x40080000`, and sets `bootopt=64S3,32N2,64N2`.
+Unresolved: where LK stages the compressed kernel before inflating (if it overlapped the
+destination, inflating would fail with "decompress kernel image fail!!!").
+
 ## Unknown — must be measured from your backup
 
 | Question | How we answer it |

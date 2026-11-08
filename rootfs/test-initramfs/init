@@ -1,0 +1,118 @@
+#!/bin/sh
+# X04G first-boot diagnostic initramfs.
+#
+# SAFETY: this init never mounts, writes, formats or erases eMMC partitions.
+# It only reads /proc and /sys, brings up a USB gadget and shows status on screen.
+#
+# What you get on the PC (micro-USB):
+#   * USB serial (CDC ACM)  -> root shell on the COM port, 115200 8N1 (any baud works)
+#   * USB network (CDC NCM) -> clock is 172.16.42.1, PC gets 172.16.42.2 via DHCP
+#                              telnet 172.16.42.1  (root shell, no password)
+# The screen shows the kernel log (fbcon) plus a status line every 10 s.
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+mkdir -p /proc /sys /dev/pts /tmp /run /config /sys/fs/pstore
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devpts devpts /dev/pts
+mount -t tmpfs tmpfs /tmp
+mount -t tmpfs tmpfs /run
+mount -t configfs configfs /sys/kernel/config 2>/dev/null
+mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null
+mount -t pstore pstore /sys/fs/pstore 2>/dev/null
+
+say() { echo "[x04g-init] $*" > /dev/kmsg; echo "[x04g-init] $*"; }
+say "X04G diagnostic initramfs starting ($(uname -r))"
+
+# Show the log on the panel even if fbcon picked another console
+echo 7 > /proc/sys/kernel/printk 2>/dev/null
+
+# Optional modules shipped in the initramfs (touch, light sensor)
+for m in /lib/modules/*.ko; do
+    [ -e "$m" ] && insmod "$m" 2>/dev/null && say "loaded $(basename "$m")"
+done
+
+# ---- Report (read-only data collection) -----------------------------------
+report() {
+    echo "=== uname";      uname -a
+    echo "=== cmdline";    cat /proc/cmdline
+    echo "=== meminfo";    head -5 /proc/meminfo
+    echo "=== iomem";      cat /proc/iomem
+    echo "=== partitions"; cat /proc/partitions
+    echo "=== mmc";        ls /sys/class/mmc_host/*/ 2>/dev/null
+    echo "=== drm";        ls /sys/class/drm 2>/dev/null; cat /sys/class/drm/*/status 2>/dev/null
+    echo "=== backlight";  for b in /sys/class/backlight/*; do echo "$b $(cat $b/brightness)/$(cat $b/max_brightness)"; done 2>/dev/null
+    echo "=== input";      cat /proc/bus/input/devices
+    echo "=== udc";        ls /sys/class/udc 2>/dev/null
+    echo "=== thermal";    for t in /sys/class/thermal/thermal_zone*; do echo "$t $(cat $t/type) $(cat $t/temp)"; done 2>/dev/null
+    echo "=== cpufreq";    cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq 2>/dev/null
+    echo "=== pstore";     ls -la /sys/fs/pstore
+    echo "=== dmesg";      dmesg
+}
+report > /run/x04g-report.txt 2>&1
+say "report written to /run/x04g-report.txt ($(wc -c < /run/x04g-report.txt) bytes)"
+
+# ---- USB gadget: ACM serial + NCM network ---------------------------------
+gadget_up() {
+    G=/sys/kernel/config/usb_gadget/x04g
+    [ -d /sys/kernel/config/usb_gadget ] || { say "no configfs usb_gadget"; return 1; }
+    UDC=$(ls /sys/class/udc 2>/dev/null | head -n1)
+    [ -n "$UDC" ] || { say "no UDC found (USB peripheral driver missing?)"; return 1; }
+    mkdir -p $G && cd $G || return 1
+    echo 0x1d6b > idVendor          # Linux Foundation
+    echo 0x0104 > idProduct         # Multifunction Composite Gadget
+    echo 0x0200 > bcdUSB
+    echo 0xEF > bDeviceClass        # misc / IAD, needed for Windows composite
+    echo 0x02 > bDeviceSubClass
+    echo 0x01 > bDeviceProtocol
+    mkdir -p strings/0x409
+    echo "X04G_LINUX"            > strings/0x409/manufacturer
+    echo "Mi Smart Clock (Linux)" > strings/0x409/product
+    echo "x04g-diag"             > strings/0x409/serialnumber
+    mkdir -p configs/c.1/strings/0x409
+    echo "ACM+NCM" > configs/c.1/strings/0x409/configuration
+    echo 250 > configs/c.1/MaxPower
+    mkdir -p functions/acm.usb0 && ln -s functions/acm.usb0 configs/c.1/ 2>/dev/null
+    if mkdir -p functions/ncm.usb0 2>/dev/null; then
+        ln -s functions/ncm.usb0 configs/c.1/ 2>/dev/null
+    fi
+    echo "$UDC" > UDC && say "USB gadget bound to $UDC"
+    cd /
+}
+gadget_up
+
+# Shell on the USB serial port, respawned forever
+( while true; do
+      [ -e /dev/ttyGS0 ] && setsid sh -c 'exec getty -n -l /bin/sh 115200 ttyGS0 vt100' 2>/dev/null
+      sleep 2
+  done ) &
+
+# USB network: static address + DHCP for the PC + telnet
+sleep 2
+if ip link show usb0 >/dev/null 2>&1; then
+    ip addr add 172.16.42.1/24 dev usb0
+    ip link set usb0 up
+    mkdir -p /var/lib/misc && touch /var/lib/misc/udhcpd.leases
+    cat > /etc/udhcpd.conf <<EOF
+start 172.16.42.2
+end 172.16.42.2
+interface usb0
+max_leases 1
+option subnet 255.255.255.0
+lease_file /var/lib/misc/udhcpd.leases
+EOF
+    udhcpd /etc/udhcpd.conf
+    telnetd -l /bin/sh
+    say "USB network up: telnet 172.16.42.1"
+else
+    say "usb0 not present (NCM unavailable) - use the USB serial port"
+fi
+
+# Status line on the panel every 10 s; never exits (PID 1 must not die)
+while true; do
+    MEM=$(awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{printf "%d/%d MiB free", a/1024, t/1024}' /proc/meminfo)
+    T=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
+    echo "[x04g] up $(cut -d. -f1 /proc/uptime)s  $MEM  temp ${T:-?}  usb $(cat /sys/class/udc/*/state 2>/dev/null)" > /dev/tty0
+    sleep 10
+done

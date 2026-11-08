@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-08 — first boot image (RAM boot), LK analysed
+
+- backup-x04g-adb.ps1: the user's run showed every LF expanded to CRLF (su behind a tty). Script
+  now undoes this when the raw hash mismatches and accepts only a device-hash match. The user's
+  six images were repaired the same way; all match the device SHA-256.
+- Static analysis of the stock LK: bootopt parsing, 512 KiB kernel alignment rule for 64-bit,
+  gzip-only decompress, v2 DTB / appended DTB, `/memory` rewrite, fastboot `boot` command exists
+  (BOOT_ARCHITECTURE.md).
+- Stock boot.img measured: header v2, page 2048, ramdisk 0x55000000, tags/DTB 0x54000000.
+- rootfs/test-initramfs: read-only diagnostic init (screen status, report, USB ACM shell + NCM
+  network/telnet). scripts/linux/build-busybox.sh (busybox 1.36.1, static aarch64).
+- CI: builds busybox + diagnostic initramfs and smoke-boots kernel + initramfs in QEMU virt.
+- QEMU (emulated): init runs, modules load, report written, PID 1 stays alive.
+- First image `x04g-diag-boot.img` built from the user's stock header; payloads verified.
+- Fix: mkbootimg-from-stock.sh and verify_backup.py were committed without the executable bit.
+
 ## 2026-11-08 — facts from the user's unit (stock Android over ADB)
 
 - Unit is already bootloader-unlocked (orange); stock kernel is 32-bit (`bootopt=64S3,32N2,32N2`).

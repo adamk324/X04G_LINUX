@@ -9,7 +9,8 @@ Legend: **source** = checked by reading source code · **built** = compiled succ
 | 2 Dev environment | scripts + CI workflow written; repo pushed to GitHub; local cloud build OK; GitHub Actions verified (run #2 green, artifact uploaded) |
 | 3 Kernel compilation | done: reproducible build locally and in CI (built, not booted) |
 | 4 Device preparation | unit facts measured over ADB (unlocked, 32-bit stock kernel, 1 GiB, memory map); **backup still needed** |
-| 5–8 | not started |
+| 5 First Linux boot | **ready to test:** `x04g-diag-boot.img` built from your stock header; LK requirements derived from your `lk.bin` (BOOT_ARCHITECTURE); kernel + initramfs smoke-booted in QEMU (emulated). Procedure: FIRST_BOOT.md |
+| 6–8 | not started |
 
 ## Build results
 
