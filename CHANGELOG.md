@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-08 — T7 result, LK probes
+
+- T7 (zimage64, CI-built) on hardware: no USB, reset at 62.6 s — identical to native64 runs.
+- scripts/linux/lk-probes: P1 (32-bit PSCI-reset stub), P3 (zimage64-style AArch32→AArch64
+  switch via smc 0x82000200, then PSCI reset), P0/P2 (stock control / stock DT, local only).
+  Encodings checked with objdump; not runnable in QEMU (MediaTek SiP call).
+
 ## 2026-11-08 — fix flaky emulated USB self-test (CI run #7)
 
 - CI #7 failed in the QEMU self-test: emulated host side requested DHCP before its NCM link had

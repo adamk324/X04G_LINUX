@@ -5,10 +5,24 @@
 | Date | Image | Result |
 |---|---|---|
 | 2026-11-08 | `x04g-diag-boot.img` (c38b74f) | `fastboot boot`: Sending OKAY, **Booting OKAY**. Screen kept LK's "USB Transmission OK" text, then after ~20 s the clock reset into stock Android. No kernel output on screen. → LK accepted and jumped; kernel hung early, or ran without screen and without feeding LK's watchdog. Undetermined: that image had no USB channel at kernel stage (now added, see T4). |
+| 2026-11-08 | `x04g-T7-zimage64-usbdiag.img` (CI 0cfd4c3) | Same as native64: Booting OKAY, no USB, reset at 62.6 s, then LK fastboot. Identical reset time with two entirely different kernel payloads → suspect LK never reaches the jump (or the fastboot `boot` path itself). Next: LK probes P0–P3. |
 | 2026-11-08 | `x04g-T6-initcalls.img` / T5 (adce887) | Screen keeps LK's "USB Transmission OK" (photo), no kernel text even with simpledrm + initcall_debug; no USB; preloader at 62.9 s, LK fastboot at 83.7 s. Reset time identical to T4 regardless of cmdline/drivers → the kernel most likely never executes in LK's native 64-bit path. |
 | 2026-11-08 | `x04g-T4-usbdiag.img` (3ca372f) via `x04g-usb-monitor.ps1` | Booting OKAY at t=0; **no USB device at all** (kernel-stage g_serial 0525:A4A7 never enumerated); preloader at 63.2 s (reset); LK fastboot at 82.7 s, later continued to Android. → kernel did not get the MUSB controller up; suspected early hang. Suspect: CONFIG_OPTEE=y (not in lscorcia's config) and other drivers that touch secure-world resources on stock firmware. |
 
-## Next: zimage64 boot path (T7/T8, built by CI)
+## LK probes (P0–P3): does LK hand over control at all?
+
+Tiny payloads whose only job is to reset the board immediately (PSCI SYSTEM_RESET), so the
+reset time after `Booting OKAY` shows how far LK got. Built by
+`scripts/linux/lk-probes/build-lk-probes.sh` (sources in that folder).
+
+| Probe | Kernel slot | DT | Result reading |
+|---|---|---|---|
+| P0 | stock boot.img, unchanged | stock | Android boots → `fastboot boot` path works; ~60 s reset → the RAM-boot path itself is broken |
+| P1 | 32-bit stub → PSCI reset | ours | reset within ~1–5 s → LK jumps into our image |
+| P2 | same stub | stock (from boot.img) | P2 fast but P1 slow → LK chokes on our mainline DT |
+| P3 | zimage64-style AArch32 trampoline → `smc 0x82000200` → AArch64 stub → PSCI reset | ours | fast → the AArch64 switch works; slow while P1 is fast → switch refused |
+
+## zimage64 boot path (T7/T8, built by CI)
 
 pmaports boots mainline arm64 on 32-bit-firmware MediaTek devices (e.g. Doogee X5 Pro, MT6735P)
 with `bootopt=64S3,32N2,32N2`, kernel at `0x40008000` and the **zimage64** shim
