@@ -5,6 +5,7 @@
 | Date | Image | Result |
 |---|---|---|
 | 2026-11-08 | `x04g-diag-boot.img` (c38b74f) | `fastboot boot`: Sending OKAY, **Booting OKAY**. Screen kept LK's "USB Transmission OK" text, then after ~20 s the clock reset into stock Android. No kernel output on screen. → LK accepted and jumped; kernel hung early, or ran without screen and without feeding LK's watchdog. Undetermined: that image had no USB channel at kernel stage (now added, see T4). |
+| 2026-11-08 | `x04g-T4-usbdiag.img` (3ca372f) via `x04g-usb-monitor.ps1` | Booting OKAY at t=0; **no USB device at all** (kernel-stage g_serial 0525:A4A7 never enumerated); preloader at 63.2 s (reset); LK fastboot at 82.7 s, later continued to Android. → kernel did not get the MUSB controller up; suspected early hang. Suspect: CONFIG_OPTEE=y (not in lscorcia's config) and other drivers that touch secure-world resources on stock firmware. |
 
 ## Timing tests (no UART needed)
 
@@ -12,10 +13,13 @@ Start a stopwatch when `fastboot` prints `Booting OKAY`, stop when the Mi logo a
 
 | Image | cmdline extras | init |
 |---|---|---|
-| **`x04g-T4-usbdiag.img`** (primary) | `panic=10 console=ttyGS0,115200 console=tty0 clk_ignore_unused pd_ignore_unused` | USB-first diagnostic init — use with `x04g-usb-monitor.ps1`, see USB_DEBUGGING.md |
+| **`x04g-T5-noSecureDrivers.img`** | T4 + `initcall_debug loglevel=8 printk.time=1 initcall_blacklist=mtk_drm_init,optee_core_init,mtk_efuse_init,mtk_rng_driver_init,mtk_thermal_driver_init,mtk_devapc_driver_init` | USB diag init; screen shows every initcall (simpledrm on LK's framebuffer) |
+| **`x04g-T6-initcalls.img`** | T4 + `initcall_debug loglevel=8 printk.time=1 initcall_blacklist=mtk_drm_init` | same, suspects enabled: last line on screen = hanging initcall |
+| `x04g-T4-usbdiag.img` | `panic=10 console=ttyGS0,115200 console=tty0 clk_ignore_unused pd_ignore_unused` | USB-first diagnostic init — use with `x04g-usb-monitor.ps1`, see USB_DEBUGGING.md |
 | `x04g-T1-canary.img` | `panic=3 console=ttyGS0,115200 console=tty0` | sleep 8 s, `reboot -f` |
 | `x04g-T2-canary-safe.img` | T1 + `maxcpus=1 clk_ignore_unused pd_ignore_unused` | same |
 
+LK's cmdline buffer is 2048 bytes (overflow → LK panic); our longest cmdline + LK's ~770 added chars ≈ 1.1 KB.
 All images contain the kernel with built-in g_serial, so even the canaries show a COM port
 (0525:A4A7) if the kernel gets as far as the USB controller.
 

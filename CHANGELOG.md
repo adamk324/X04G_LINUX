@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-08 — T4 result, initcall-debug images
+
+- T4 on hardware: no USB enumeration within 63 s, then reset (timeline from x04g-usb-monitor).
+- T5/T6: `initcall_debug` on the panel via simpledrm (mtk_drm_init blacklisted); T5 also
+  blacklists OP-TEE, eFuse, HW RNG, thermal, DEVAPC initcalls. QEMU: blacklist honoured, READY.
+- LK cmdline buffer measured from lk.bin: 2048 bytes, panics on overflow.
+
 ## 2026-11-08 — fix: monitor script aborted on fastboot's stderr
 
 - x04g-usb-monitor.ps1: Windows PowerShell 5.1 turned fastboot's stderr progress lines into a
