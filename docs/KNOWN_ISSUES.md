@@ -12,5 +12,5 @@
 | 8 | Boot image format expected by LK not yet measured | first boot image may be rejected | resolved by `mkbootimg-from-stock.sh` once `boot.bin` backup exists |
 | 9 | No UART available on the user's setup (and it would be 1.8 V) | early kernel hangs before USB probes stay invisible | USB-only debugging, see USB_DEBUGGING.md; UART optional |
 | 10 | GitHub write access not available from the cloud build session | commits must be pushed from your PC | see DEVELOPMENT_STATUS.md |
-| 11 | Stock runs a 32-bit kernel (`bootopt=…,32N2`); arm64 needs `64N2` | wrong mode = no boot | handled in `mkbootimg-from-stock.sh`; unverified on hardware |
+| 11 | Stock runs a 32-bit kernel (`bootopt=…,32N2`); LK's native 64N2 path never started our kernel (T4–T6) | no boot | switched to zimage64 shim on the 32N2 path (T7/T8, pending test) |
 | 12 | `mt8516.dtsi` reserves `secmon@43000000` / `optee@43200000`, but stock shows that range as normal RAM | a few MiB lost; harmless | upstream, leave as is |

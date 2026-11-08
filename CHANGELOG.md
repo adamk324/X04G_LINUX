@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-08 — switch to the zimage64 boot route
+
+- T5/T6 on hardware: no kernel output on screen (photo), no USB, reset at 62.9 s — same as T4.
+  Conclusion: LK's native 64-bit path does not start our kernel on this firmware.
+- New route (pmaports practice for 32-bit-firmware MTK devices, tested by lscorcia on MT8167):
+  32-bit zImage path + zimage64 shim (ATF smc 0x82000200 → AArch64).
+- configs/bootimg-x04g.env: measured boot.img parameters + pinned zimage64/udt/uzlib commits.
+- scripts/linux/build-zimage64.sh, scripts/linux/mkbootimg-x04g.sh (no stock image needed;
+  native64 mode reproduces the stock-derived header exactly).
+- CI builds the shim and the T7/T8 RAM-boot images as artifacts (gitlab.com is not reachable
+  from the development sandbox, so the shim is built in GitHub Actions).
+
 ## 2026-11-08 — T4 result, initcall-debug images
 
 - T4 on hardware: no USB enumeration within 63 s, then reset (timeline from x04g-usb-monitor).

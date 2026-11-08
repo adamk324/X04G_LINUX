@@ -65,6 +65,16 @@ Our image keeps those offsets except kernel → `0x40080000`, and sets `bootopt=
 Unresolved: where LK stages the compressed kernel before inflating (if it overlapped the
 destination, inflating would fail with "decompress kernel image fail!!!").
 
+## Boot mode decision (2026-11-08)
+
+LK's native 64-bit path (`bootopt=…,64N2`, Image.gz-dtb at 0x40080000) was tried three times:
+LK always reported `Booting OKAY`, but no kernel activity was ever observed (no USB, no screen
+output even with simpledrm + initcall_debug), and the board reset ~63 s later regardless of
+kernel options. Switched to the **zimage64** route used by pmaports for 32-bit-firmware MTK
+devices: keep `bootopt=64S3,32N2,32N2` and the stock kernel address `0x40008000`; the shim's
+AArch32 entry issues `smc 0x82000200` with r1 = AArch64 entry, r2 = DT, r4 = 1 (KERNEL_64),
+then inflates the kernel (uzlib) and jumps with x0 = DT. See configs/bootimg-x04g.env.
+
 ## Unknown — must be measured from your backup
 
 | Question | How we answer it |

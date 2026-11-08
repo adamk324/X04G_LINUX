@@ -5,7 +5,24 @@
 | Date | Image | Result |
 |---|---|---|
 | 2026-11-08 | `x04g-diag-boot.img` (c38b74f) | `fastboot boot`: Sending OKAY, **Booting OKAY**. Screen kept LK's "USB Transmission OK" text, then after ~20 s the clock reset into stock Android. No kernel output on screen. → LK accepted and jumped; kernel hung early, or ran without screen and without feeding LK's watchdog. Undetermined: that image had no USB channel at kernel stage (now added, see T4). |
+| 2026-11-08 | `x04g-T6-initcalls.img` / T5 (adce887) | Screen keeps LK's "USB Transmission OK" (photo), no kernel text even with simpledrm + initcall_debug; no USB; preloader at 62.9 s, LK fastboot at 83.7 s. Reset time identical to T4 regardless of cmdline/drivers → the kernel most likely never executes in LK's native 64-bit path. |
 | 2026-11-08 | `x04g-T4-usbdiag.img` (3ca372f) via `x04g-usb-monitor.ps1` | Booting OKAY at t=0; **no USB device at all** (kernel-stage g_serial 0525:A4A7 never enumerated); preloader at 63.2 s (reset); LK fastboot at 82.7 s, later continued to Android. → kernel did not get the MUSB controller up; suspected early hang. Suspect: CONFIG_OPTEE=y (not in lscorcia's config) and other drivers that touch secure-world resources on stock firmware. |
+
+## Next: zimage64 boot path (T7/T8, built by CI)
+
+pmaports boots mainline arm64 on 32-bit-firmware MediaTek devices (e.g. Doogee X5 Pro, MT6735P)
+with `bootopt=64S3,32N2,32N2`, kernel at `0x40008000` and the **zimage64** shim
+(gitlab.com/sleirsgoevy/zimage64; lscorcia tested commit 5668afde on MT8167, pmaports !9830).
+LK starts it as a normal 32-bit zImage; the shim calls ATF `smc 0x82000200` (KERNEL_64) to
+enter AArch64, inflates the real kernel to a 2 MiB-aligned address and jumps to it.
+
+| Image (CI artifact `bootimg/`) | Purpose |
+|---|---|
+| `x04g-T7-zimage64-usbdiag.img` | zimage64 + USB diagnostic init (primary) |
+| `x04g-T8-zimage64-canary.img` | zimage64 + timing canary (reboot 8 s after userspace) |
+
+Built by `scripts/linux/build-zimage64.sh` + `scripts/linux/mkbootimg-x04g.sh` from the measured
+parameters in `configs/bootimg-x04g.env` (no stock image needed).
 
 ## Timing tests (no UART needed)
 

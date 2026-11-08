@@ -10,6 +10,7 @@ on:
       - 'scripts/linux/**'
       - 'rootfs/test-initramfs/**'
       - '.github/workflows/kernel-build.yml'
+      - 'configs/bootimg-x04g.env'
   pull_request:
     paths:
       - 'kernel/**'
@@ -57,7 +58,8 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-            flex bison bc libssl-dev libelf-dev device-tree-compiler cpio kmod ccache
+            flex bison bc libssl-dev libelf-dev device-tree-compiler cpio kmod ccache \
+            zlib1g-dev pkg-config mkbootimg
           aarch64-linux-gnu-gcc --version | head -1
 
       - name: Restore ccache
@@ -114,6 +116,23 @@ jobs:
           grep -q "ST2 DHCP lease on .*: 172.16.42.2" build/artifacts/qemu-usb-selftest.log
           grep -q "ACM shell round-trip: SELFTEST_42" build/artifacts/qemu-usb-selftest.log
           echo "USB gadget self-test OK (emulated)"
+
+      - name: Build zimage64 shim (pinned) and RAM-boot test images
+        run: |
+          scripts/linux/build-zimage64.sh build/zimage64
+          mkdir -p build/artifacts/bootimg
+          USB="console=ttyGS0,115200 console=tty0"
+          # T7: zimage64 path + USB diagnostic init (primary test image)
+          scripts/linux/mkbootimg-x04g.sh zimage64 build/artifacts/boot \
+            build/artifacts/x04g-diag-initramfs.cpio.gz build/artifacts/bootimg/x04g-T7-zimage64-usbdiag.img \
+            "panic=10 $USB clk_ignore_unused pd_ignore_unused"
+          # T8: zimage64 path + timing canary
+          INIT=rootfs/test-initramfs/canary-init rootfs/test-initramfs/build.sh build/busybox-out/busybox \
+            "build/artifacts/modules-$(grep '^kernel_release=' build/artifacts/build-info.txt | cut -d= -f2).tar.gz" build/canary.cpio.gz
+          scripts/linux/mkbootimg-x04g.sh zimage64 build/artifacts/boot build/canary.cpio.gz \
+            build/artifacts/bootimg/x04g-T8-zimage64-canary.img "panic=3 $USB"
+          (cd build/artifacts && sha256sum bootimg/*.img >> SHA256SUMS)
+          ls -la build/artifacts/bootimg
 
       - name: Job summary
         if: always()
