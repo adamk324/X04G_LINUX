@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-08 — fix flaky emulated USB self-test (CI run #7)
+
+- CI #7 failed in the QEMU self-test: emulated host side requested DHCP before its NCM link had
+  carrier (`ST2 DHCP lease on usb1:` empty, `host 0`). Gadget side and ACM shell were fine.
+  Reproduced locally (1/6). Self-test now waits for host carrier and retries udhcpc; it powers the
+  VM off when done. Local result: 12/12 passes. Device behaviour unchanged (code only runs with
+  `x04g.selftest=1`).
+
 ## 2026-11-08 — switch to the zimage64 boot route
 
 - T5/T6 on hardware: no kernel output on screen (photo), no USB, reset at 62.9 s — same as T4.

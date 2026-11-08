@@ -176,8 +176,13 @@ if grep -q 'x04g.selftest=1' /proc/cmdline; then
         printf '#!/bin/sh\n[ "$1" = bound ] && ip addr add "$ip/24" dev "$interface"\nexit 0\n' > /usr/share/udhcpc/default.script
         chmod +x /usr/share/udhcpc/default.script
         ip link set "$HOSTIF" up
-        # same kernel owns both addresses: force traffic through the USB link via a netns-free trick
-        udhcpc -i "$HOSTIF" -n -q -t 5 >/dev/null 2>&1
+        # Wait for the emulated host side of the NCM link (carrier) before asking for a lease,
+        # then retry; CI run #7 failed when udhcpc started before the host link was up.
+        for n in $(seq 1 30); do [ "$(cat /sys/class/net/$HOSTIF/carrier 2>/dev/null)" = 1 ] && break; sleep 0.5; done
+        for n in 1 2 3; do
+            udhcpc -i "$HOSTIF" -n -q -t 5 >/dev/null 2>&1
+            ip -4 addr show "$HOSTIF" | grep -q 'inet 172.16.42.2' && break
+        done
         stage ST2 "DHCP lease on $HOSTIF: $(ip -4 addr show "$HOSTIF" | awk '/inet /{print $2}')"
         stage ST3 "NCM carrier: gadget $(cat /sys/class/net/$IF/carrier 2>/dev/null) host $(cat /sys/class/net/$HOSTIF/carrier 2>/dev/null)"
     fi
@@ -194,6 +199,7 @@ if grep -q 'x04g.selftest=1' /proc/cmdline; then
         stage ST4 "ACM shell round-trip: ${R:-NO RESPONSE} (rx $(wc -c < /tmp/acm.out) bytes; shells: $(ps | grep -c '[g]etty\|[s]h -c'))"
     fi
     stage ST5 "selftest done"
+    sleep 1; sync; poweroff -f    # emulator only: end the VM so CI does not idle
 fi
 
 # Keep the shell readable: only warnings and our stage lines on the USB console from now on
