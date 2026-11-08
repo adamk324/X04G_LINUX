@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-08 — first successful kernel build
+
+- First kernel build `7.3.0-x04g` succeeded (cloud session, gcc 13.3.0). Built only, not booted.
+- build-kernel.sh: fixed a silent exit (gzip SIGPIPE under pipefail) in the Image magic check;
+  empty LOCALVERSION so the release has no `+`; stale module tarballs are removed.
+- mkbootimg-from-stock.sh: stub for Ubuntu 24.04's missing `gki` module, keeps empty args
+  (`--board ''`), preserves the MTK `bootopt=` token from the stock cmdline. Tested against a
+  synthetic header-v2 image: payloads and offsets round-trip.
+
 ## 2026-11-08 — Milestone 1/2 bootstrap
 
 - Repository structure, docs (hardware, boot chain, recovery, kernel, build, distro, status, issues).

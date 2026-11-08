@@ -15,6 +15,17 @@ set -euo pipefail
 STOCK="$1"; BOOTDIR="$2"; RAMDISK="$3"; OUTIMG="$4"; EXTRA="${5:-}"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
+# Ubuntu 24.04's "mkbootimg" package ships without its `gki` helper module
+# (only needed for boot header v4 GKI certificates). Provide a stub so v0-v3 work.
+if ! python3 -c 'import gki.generate_gki_certificate' 2>/dev/null && \
+   ! mkbootimg --help >/dev/null 2>&1; then
+    mkdir -p "$WORK/pystub/gki"
+    : > "$WORK/pystub/gki/__init__.py"
+    printf 'def generate_gki_certificate(*a, **k):\n    raise SystemExit("GKI certificates (header v4) unsupported")\n' \
+        > "$WORK/pystub/gki/generate_gki_certificate.py"
+    export PYTHONPATH="$WORK/pystub${PYTHONPATH:+:$PYTHONPATH}"
+fi
+
 unpack_bootimg --boot_img "$STOCK" --out "$WORK/stock" > "$WORK/info.txt"
 cat "$WORK/info.txt"
 
@@ -50,10 +61,12 @@ python3 - "$ARGS_FILE" "$KERNEL" "$RAMDISK" "$OUTIMG" "$EXTRA" "$WORK" "$BOOTDIR
 import sys, subprocess, os
 argsf, kernel, ramdisk, out, extra, work, bootdir = sys.argv[1:]
 a = open(argsf,'rb').read().split(b'\0')
-a = [x.decode() for x in a if x]
-res = []; i = 0
+a = [x.decode() for x in a]
+if a and a[-1] == '': a.pop()   # keep empty values such as --board ''
+res = []; i = 0; stock_cmdline = ''
 drop_val = {'--kernel','--ramdisk','--dtb','--output','--out','--cmdline'}
 while i < len(a):
+    if a[i] == '--cmdline': stock_cmdline = a[i+1]
     if a[i] in drop_val: i += 2; continue
     res.append(a[i]); i += 1
 cmd = ['mkbootimg'] + res + ['--kernel', kernel, '--output', out]
@@ -65,7 +78,10 @@ else:
 if '--header_version' in res and int(res[res.index('--header_version')+1]) == 2:
     dtbs = [f for f in os.listdir(bootdir) if f.endswith('.dtb')]
     cmd += ['--dtb', os.path.join(bootdir, dtbs[0])]
-cmdline = 'console=ttyS0,921600n1 console=tty0 earlycon fbcon=rotate:3 loglevel=7 ' + extra
+# MTK LK reads `bootopt=` from the image cmdline to pick the CPU mode (e.g. 64S3,32N2,64N2
+# = boot the kernel in AArch64). Keep any stock bootopt token verbatim.
+keep = [t for t in stock_cmdline.split() if t.startswith('bootopt=')]
+cmdline = ' '.join(keep + ['console=ttyS0,921600n1 console=tty0 earlycon fbcon=rotate:3 loglevel=7', extra])
 cmd += ['--cmdline', cmdline.strip()]
 print('+', ' '.join(cmd))
 subprocess.check_call(cmd)

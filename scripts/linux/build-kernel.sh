@@ -18,6 +18,8 @@ export ARCH=arm64
 export CROSS_COMPILE="${CROSS_COMPILE:-aarch64-linux-gnu-}"
 # CROSS_COMPILE may be "ccache aarch64-linux-gnu-"; strip the wrapper for metadata
 TC_PREFIX="${CROSS_COMPILE##* }"
+# Empty LOCALVERSION stops setlocalversion from appending "+" (release = 7.3.0-x04g)
+export LOCALVERSION=""
 export KBUILD_BUILD_USER="x04g"
 export KBUILD_BUILD_HOST="x04g-linux"
 # Reproducibility: fixed timestamp derived from the kernel commit
@@ -53,7 +55,7 @@ run make O="$OUT" -j"$JOBS" Image.gz modules dtbs
 
 # ---- Collect artifacts -----------------------------------------------------
 KREL="$(cat "$OUT/include/config/kernel.release")"
-rm -rf "$ART/boot" "$ART/modules"
+rm -rf "$ART/boot" "$ART/modules" "$ART"/modules-*.tar.gz
 mkdir -p "$ART/boot" "$ART/modules"
 cp "$OUT/arch/arm64/boot/Image.gz" "$ART/boot/"
 cp "$OUT/arch/arm64/boot/dts/$KERNEL_DTB" "$ART/boot/"
@@ -62,7 +64,7 @@ DTB_NAME="$(basename "$KERNEL_DTB")"
 cat "$ART/boot/Image.gz" "$ART/boot/$DTB_NAME" > "$ART/boot/Image.gz-dtb"
 cp "$OUT/.config" "$ART/boot/config-$KREL"
 cp "$OUT/System.map" "$ART/boot/System.map-$KREL"
-make -s O="$OUT" INSTALL_MOD_PATH="$ART/modules" INSTALL_MOD_STRIP=1 modules_install
+run make -s O="$OUT" INSTALL_MOD_PATH="$ART/modules" INSTALL_MOD_STRIP=1 modules_install
 rm -f "$ART/modules/lib/modules/$KREL/build" "$ART/modules/lib/modules/$KREL/source"
 tar -C "$ART/modules" -czf "$ART/modules-$KREL.tar.gz" lib
 rm -rf "$ART/modules"
@@ -75,7 +77,9 @@ fail() { echo "VERIFY FAILED: $*" | tee -a "$LOG"; exit 1; }
 [ -s "$ART/boot/Image.gz" ] || fail "Image.gz missing"
 gzip -t "$ART/boot/Image.gz" || fail "Image.gz corrupt"
 # arm64 Image header magic "ARM\x64" at offset 0x38
-MAGIC="$(gzip -dc "$ART/boot/Image.gz" | head -c 64 | tail -c 8 | head -c 4 | od -An -tx1 | tr -d ' \n')"
+# (decompress fully into a temp file: piping into head would SIGPIPE gzip and trip pipefail)
+TMPIMG="$(mktemp)"; gzip -dc "$ART/boot/Image.gz" > "$TMPIMG"
+MAGIC="$(od -An -tx1 -j56 -N4 "$TMPIMG" | tr -d ' \n')"; rm -f "$TMPIMG"
 [ "$MAGIC" = "41524d64" ] || fail "bad arm64 Image magic ($MAGIC)"
 [ "$(od -An -tx1 -N4 "$ART/boot/$DTB_NAME" | tr -d ' \n')" = "d00dfeed" ] || fail "bad DTB magic"
 fdtget "$ART/boot/$DTB_NAME" / compatible | grep -q "xiaomi,x04g" || fail "DTB compatible is not xiaomi,x04g"
