@@ -95,9 +95,25 @@ jobs:
           timeout 120 qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 4 -m 1024 -nographic \
             -no-reboot -kernel build/Image -initrd build/artifacts/x04g-diag-initramfs.cpio.gz \
             -append "console=ttyAMA0 panic=-1" > build/artifacts/qemu-smoke.log 2>&1 || true
-          grep -q "report written to /run/x04g-report.txt" build/artifacts/qemu-smoke.log
+          grep -q "S10 READY" build/artifacts/qemu-smoke.log
           ! grep -q "Kernel panic" build/artifacts/qemu-smoke.log
           echo "QEMU smoke boot OK (init ran, PID 1 alive)"
+
+      - name: Emulated USB gadget self-test (QEMU + dummy_hcd, not hardware)
+        run: |
+          KREL=$(grep '^kernel_release=' build/artifacts/build-info.txt | cut -d= -f2)
+          EXTRA_MODULES="dummy_hcd.ko mii.ko usbnet.ko cdc_ether.ko cdc_ncm.ko cdc-acm.ko" \
+            rootfs/test-initramfs/build.sh build/busybox-out/busybox \
+            "build/artifacts/modules-${KREL}.tar.gz" build/qemu-usb.cpio.gz
+          timeout 60 qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 4 -m 1024 -nographic \
+            -no-reboot -kernel build/Image -initrd build/qemu-usb.cpio.gz \
+            -append "console=ttyAMA0 x04g.selftest=1 panic=3" > build/artifacts/qemu-usb-selftest.log 2>&1 || true
+          grep -E "x04g: \[T" build/artifacts/qemu-usb-selftest.log | grep -v " HB " || true
+          grep -q "S05 UDC dummy_udc.0 present, bound function: g_serial" build/artifacts/qemu-usb-selftest.log
+          grep -q "configfs ACM+NCM bound" build/artifacts/qemu-usb-selftest.log
+          grep -q "ST2 DHCP lease on .*: 172.16.42.2" build/artifacts/qemu-usb-selftest.log
+          grep -q "ACM shell round-trip: SELFTEST_42" build/artifacts/qemu-usb-selftest.log
+          echo "USB gadget self-test OK (emulated)"
 
       - name: Job summary
         if: always()

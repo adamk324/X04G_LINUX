@@ -4,7 +4,7 @@
 
 | Date | Image | Result |
 |---|---|---|
-| 2026-11-08 | `x04g-diag-boot.img` (c38b74f) | `fastboot boot`: Sending OKAY, **Booting OKAY**. Screen kept LK's "USB Transmission OK" text, then after ~20 s the clock reset into stock Android. No kernel output on screen. → LK accepted and jumped; kernel hung early, or ran without screen and without feeding LK's watchdog. Undetermined without UART. |
+| 2026-11-08 | `x04g-diag-boot.img` (c38b74f) | `fastboot boot`: Sending OKAY, **Booting OKAY**. Screen kept LK's "USB Transmission OK" text, then after ~20 s the clock reset into stock Android. No kernel output on screen. → LK accepted and jumped; kernel hung early, or ran without screen and without feeding LK's watchdog. Undetermined: that image had no USB channel at kernel stage (now added, see T4). |
 
 ## Timing tests (no UART needed)
 
@@ -12,9 +12,12 @@ Start a stopwatch when `fastboot` prints `Booting OKAY`, stop when the Mi logo a
 
 | Image | cmdline extras | init |
 |---|---|---|
-| `x04g-T1-canary.img` | `panic=3` | sleep 8 s, `reboot -f` |
-| `x04g-T2-canary-safe.img` | `panic=3 maxcpus=1 clk_ignore_unused pd_ignore_unused` | same |
-| `x04g-T3-diag-safe.img` | `panic=3 clk_ignore_unused pd_ignore_unused` | diagnostic init + feeds `/dev/watchdog0` |
+| **`x04g-T4-usbdiag.img`** (primary) | `panic=10 console=ttyGS0,115200 console=tty0 clk_ignore_unused pd_ignore_unused` | USB-first diagnostic init — use with `x04g-usb-monitor.ps1`, see USB_DEBUGGING.md |
+| `x04g-T1-canary.img` | `panic=3 console=ttyGS0,115200 console=tty0` | sleep 8 s, `reboot -f` |
+| `x04g-T2-canary-safe.img` | T1 + `maxcpus=1 clk_ignore_unused pd_ignore_unused` | same |
+
+All images contain the kernel with built-in g_serial, so even the canaries show a COM port
+(0525:A4A7) if the kernel gets as far as the USB controller.
 
 Reading: **~9–13 s** = userspace ran · **~3–6 s** = kernel panic · **~20 s** = early hang
 (LK watchdog). QEMU reference for T1: userspace at 1.0 s, reboot at 9.0 s (emulated).
@@ -25,7 +28,7 @@ stock Android exactly as before.
 
 ## What the test image is
 
-`x04g-diag-boot.img` = our kernel `7.3.0-x04g` (+ DTB with patch 0001) + the diagnostic
+`x04g-T4-usbdiag.img` = our kernel `7.3.0-x04g` (+ DTB with patch 0001) + the diagnostic
 initramfs from `rootfs/test-initramfs/` (busybox 1.36.1). The initramfs **never mounts or
 writes eMMC**. It:
 
@@ -38,7 +41,7 @@ Rebuild (WSL/CI):
 ```bash
 scripts/linux/build-busybox.sh
 rootfs/test-initramfs/build.sh build/busybox-out/busybox build/artifacts/modules-7.3.0-x04g.tar.gz build/initramfs.cpio.gz
-scripts/linux/mkbootimg-from-stock.sh backups/<adb-session>/partitions/boot.bin build/artifacts/boot build/initramfs.cpio.gz build/x04g-diag-boot.img
+scripts/linux/mkbootimg-from-stock.sh backups/<adb-session>/partitions/boot.bin build/artifacts/boot build/initramfs.cpio.gz build/x04g-T4-usbdiag.img "panic=10 console=ttyGS0,115200 console=tty0 clk_ignore_unused pd_ignore_unused"
 ```
 
 ## Procedure (PowerShell, platform-tools folder)
@@ -49,7 +52,9 @@ cd F:\platform-tools-latest-windows\platform-tools
 .\fastboot devices                 # must list the clock (driver: see below)
 .\fastboot getvar unlocked
 .\fastboot getvar max-download-size
-.\fastboot boot D:\X04G_clock_linux\X04G_LINUX\build\x04g-diag-boot.img
+# preferred: one command that boots and records the USB timeline + report
+cd D:\X04G_clock_linux\X04G_LINUX
+.\scripts\windows\x04g-usb-monitor.ps1 -Image .\build\x04g-T4-usbdiag.img
 ```
 
 If `fastboot devices` is empty: Device Manager → the unknown "Android"/MT65xx device →

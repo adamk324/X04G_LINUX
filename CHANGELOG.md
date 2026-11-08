@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-08 — USB-only debugging (no UART available)
+
+- Kernel: built-in legacy g_serial + U_SERIAL_CONSOLE (`console=ttyGS0`): kernel log on a Windows
+  COM port from the moment the MUSB controller probes; dummy_hcd as module for emulator tests.
+- Diagnostic init rewritten: timestamped stages S01–S10 + heartbeat (kmsg/USB console, file,
+  panel), unbinds g_serial and binds configfs ACM+NCM (falls back to g_serial), `getty -L`
+  shell, DHCP + telnet on 172.16.42.1, NCM interface name from configfs, 8 s UDC wait.
+- Emulated self-test (QEMU + dummy_hcd): g_serial bound at kernel stage, switch to composite,
+  host-side DHCP lease 172.16.42.2, ACM shell round-trip. Added to CI.
+- scripts/windows/x04g-usb-monitor.ps1: fastboot boot + timestamped USB/COM/network timeline,
+  pulls stage log and report over serial.
+- docs/USB_DEBUGGING.md: channels, expected Windows enumeration, failure reading table.
+- New primary test image x04g-T4-usbdiag.img; T1/T2 rebuilt with the new kernel.
+
 ## 2026-11-08 — first hardware boot attempt
 
 - `fastboot boot x04g-diag-boot.img`: LK accepted (Booting OKAY), no kernel output on screen,

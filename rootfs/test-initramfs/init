@@ -1,47 +1,73 @@
 #!/bin/sh
-# X04G first-boot diagnostic initramfs.
+# X04G USB-first diagnostic initramfs.
 #
-# SAFETY: this init never mounts, writes, formats or erases eMMC partitions.
-# It only reads /proc and /sys, brings up a USB gadget and shows status on screen.
+# SAFETY: never mounts, writes, formats or erases eMMC partitions. Read-only /proc,/sys access,
+# USB gadget setup and screen output only.
 #
-# What you get on the PC (micro-USB):
-#   * USB serial (CDC ACM)  -> root shell on the COM port, 115200 8N1 (any baud works)
-#   * USB network (CDC NCM) -> clock is 172.16.42.1, PC gets 172.16.42.2 via DHCP
-#                              telnet 172.16.42.1  (root shell, no password)
-# The screen shows the kernel log (fbcon) plus a status line every 10 s.
+# Debug channels, all over the single micro-USB cable (no UART needed):
+#   kernel stage : built-in legacy g_serial (0525:A4A7) + console=ttyGS0 -> kernel log on a COM port
+#   init stage   : configfs composite (1D6B:0104) = CDC ACM (COM port, root shell + log)
+#                  + CDC NCM (network: clock 172.16.42.1, PC 172.16.42.2 by DHCP, telnet)
+#   fallback     : status lines on the panel (/dev/tty0), if the display works
+# Every stage is timestamped with the kernel uptime: [T+  1.234s] S03 ...
+# Stage log: /run/x04g-stages.txt, full report: /run/x04g-report.txt
 
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 mount -t devtmpfs devtmpfs /dev 2>/dev/null
-mkdir -p /proc /sys /dev/pts /tmp /run /config /sys/fs/pstore
 mount -t proc proc /proc
+mkdir -p /run && mount -t tmpfs tmpfs /run
+
+STAGES=/run/x04g-stages.txt
+stage() {
+    id="$1"; shift
+    t=$(cut -d' ' -f1 /proc/uptime)
+    line=$(printf '[T+%8ss] %s %s' "$t" "$id" "$*")
+    echo "<4>x04g: $line" > /dev/kmsg 2>/dev/null   # -> every kernel console (ttyGS0, tty0)
+    [ -d /run ] && echo "$line" >> "$STAGES" 2>/dev/null
+    echo "$line" > /dev/tty0 2>/dev/null              # panel fallback
+}
+
+stage S01 "init started (kernel $(cut -d' ' -f3 /proc/version))"
+
+mkdir -p /sys /dev/pts /tmp /run /sys/fs/pstore
 mount -t sysfs sysfs /sys
 mount -t devpts devpts /dev/pts
 mount -t tmpfs tmpfs /tmp
-mount -t tmpfs tmpfs /run
 mount -t configfs configfs /sys/kernel/config 2>/dev/null
 mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null
 mount -t pstore pstore /sys/fs/pstore 2>/dev/null
+stage S02 "pseudo filesystems mounted"
 
-say() { echo "[x04g-init] $*" > /dev/kmsg; echo "[x04g-init] $*"; }
-say "X04G diagnostic initramfs starting ($(uname -r))"
-
-# LK leaves the SoC hardware watchdog running (~20 s). Feed it from userspace as well, in case
-# the kernel's own boot-time pinging is not active.
+# LK leaves the SoC hardware watchdog running (~20 s). Feed it from userspace too.
+WD=none
 for w in /dev/watchdog0 /dev/watchdog; do
-    if [ -e "$w" ]; then watchdog -T 30 -t 5 "$w" && say "feeding $w"; break; fi
+    [ -e "$w" ] && watchdog -T 30 -t 5 "$w" && WD=$w && break
 done
-[ -e /dev/watchdog0 ] || say "no /dev/watchdog0 - hardware watchdog not handled by Linux"
+stage S03 "watchdog: $WD"
 
-# Show the log on the panel even if fbcon picked another console
-echo 7 > /proc/sys/kernel/printk 2>/dev/null
-
-# Optional modules shipped in the initramfs (touch, light sensor)
 for m in /lib/modules/*.ko; do
-    [ -e "$m" ] && insmod "$m" 2>/dev/null && say "loaded $(basename "$m")"
+    [ -e "$m" ] || continue
+    if insmod "$m" 2>/dev/null; then stage S04 "module loaded: $(basename "$m")"
+    else stage S04 "module FAILED: $(basename "$m")"; fi
 done
 
-# ---- Report (read-only data collection) -----------------------------------
+# Wait (max 8 s) for the USB device controller; record when it showed up
+UDC=""
+i=0
+while [ $i -lt 16 ]; do
+    UDC=$(ls /sys/class/udc 2>/dev/null | head -n1)
+    [ -n "$UDC" ] && break
+    sleep 0.5; i=$((i + 1))
+done
+if [ -n "$UDC" ]; then
+    stage S05 "UDC $UDC present, bound function: $(cat /sys/class/udc/$UDC/function 2>/dev/null || echo none), state: $(cat /sys/class/udc/$UDC/state 2>/dev/null)"
+else
+    stage S05 "NO UDC after 8 s - USB peripheral controller did not probe"
+fi
+
+# Read-only hardware report (background so USB comes up quickly)
 report() {
+    echo "=== stages";     cat "$STAGES"
     echo "=== uname";      uname -a
     echo "=== cmdline";    cat /proc/cmdline
     echo "=== meminfo";    head -5 /proc/meminfo
@@ -49,77 +75,133 @@ report() {
     echo "=== partitions"; cat /proc/partitions
     echo "=== mmc";        ls /sys/class/mmc_host/*/ 2>/dev/null
     echo "=== drm";        ls /sys/class/drm 2>/dev/null; cat /sys/class/drm/*/status 2>/dev/null
+    echo "=== fb";         cat /proc/fb
     echo "=== backlight";  for b in /sys/class/backlight/*; do echo "$b $(cat $b/brightness)/$(cat $b/max_brightness)"; done 2>/dev/null
     echo "=== input";      cat /proc/bus/input/devices
-    echo "=== udc";        ls /sys/class/udc 2>/dev/null
+    echo "=== udc";        for u in /sys/class/udc/*; do echo "$u $(cat $u/state) $(cat $u/function 2>/dev/null)"; done 2>/dev/null
     echo "=== thermal";    for t in /sys/class/thermal/thermal_zone*; do echo "$t $(cat $t/type) $(cat $t/temp)"; done 2>/dev/null
     echo "=== cpufreq";    cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq 2>/dev/null
+    echo "=== watchdog";   ls -la /dev/watchdog* 2>/dev/null; cat /sys/class/watchdog/*/identity 2>/dev/null
+    echo "=== deferred";   cat /sys/kernel/debug/devices_deferred 2>/dev/null
     echo "=== pstore";     ls -la /sys/fs/pstore
     echo "=== dmesg";      dmesg
 }
-report > /run/x04g-report.txt 2>&1
-say "report written to /run/x04g-report.txt ($(wc -c < /run/x04g-report.txt) bytes)"
 
-# ---- USB gadget: ACM serial + NCM network ---------------------------------
-gadget_up() {
-    G=/sys/kernel/config/usb_gadget/x04g
-    [ -d /sys/kernel/config/usb_gadget ] || { say "no configfs usb_gadget"; return 1; }
-    UDC=$(ls /sys/class/udc 2>/dev/null | head -n1)
-    [ -n "$UDC" ] || { say "no UDC found (USB peripheral driver missing?)"; return 1; }
+# ---- Switch legacy g_serial -> configfs ACM + NCM -----------------------------
+G=/sys/kernel/config/usb_gadget/x04g
+configfs_gadget() {
+    [ -d /sys/kernel/config/usb_gadget ] || return 1
     mkdir -p $G && cd $G || return 1
     echo 0x1d6b > idVendor          # Linux Foundation
     echo 0x0104 > idProduct         # Multifunction Composite Gadget
     echo 0x0200 > bcdUSB
-    echo 0xEF > bDeviceClass        # misc / IAD, needed for Windows composite
+    echo 0xEF > bDeviceClass        # Misc / IAD: lets Windows load per-function drivers
     echo 0x02 > bDeviceSubClass
     echo 0x01 > bDeviceProtocol
-    mkdir -p strings/0x409
-    echo "X04G_LINUX"            > strings/0x409/manufacturer
+    mkdir -p strings/0x409 configs/c.1/strings/0x409
+    echo "X04G_LINUX"             > strings/0x409/manufacturer
     echo "Mi Smart Clock (Linux)" > strings/0x409/product
-    echo "x04g-diag"             > strings/0x409/serialnumber
-    mkdir -p configs/c.1/strings/0x409
-    echo "ACM+NCM" > configs/c.1/strings/0x409/configuration
+    echo "x04g-diag"              > strings/0x409/serialnumber
+    echo "ACM+NCM"                > configs/c.1/strings/0x409/configuration
     echo 250 > configs/c.1/MaxPower
-    mkdir -p functions/acm.usb0 && ln -s functions/acm.usb0 configs/c.1/ 2>/dev/null
-    if mkdir -p functions/ncm.usb0 2>/dev/null; then
-        ln -s functions/ncm.usb0 configs/c.1/ 2>/dev/null
-    fi
-    echo "$UDC" > UDC && say "USB gadget bound to $UDC"
+    mkdir -p functions/acm.usb0 && ln -sf $G/functions/acm.usb0 configs/c.1/ 2>/dev/null
+    mkdir -p functions/ncm.usb0 2>/dev/null && ln -sf $G/functions/ncm.usb0 configs/c.1/ 2>/dev/null
+    echo "$UDC" > UDC
+    rc=$?
     cd /
+    return $rc
 }
-gadget_up
 
-# Shell on the USB serial port, respawned forever
-( while true; do
-      [ -e /dev/ttyGS0 ] && setsid sh -c 'exec getty -n -l /bin/sh 115200 ttyGS0 vt100' 2>/dev/null
-      sleep 2
-  done ) &
-
-# USB network: static address + DHCP for the PC + telnet
-sleep 2
-if ip link show usb0 >/dev/null 2>&1; then
-    ip addr add 172.16.42.1/24 dev usb0
-    ip link set usb0 up
-    mkdir -p /var/lib/misc && touch /var/lib/misc/udhcpd.leases
-    cat > /etc/udhcpd.conf <<EOF
-start 172.16.42.2
-end 172.16.42.2
-interface usb0
-max_leases 1
-option subnet 255.255.255.0
-lease_file /var/lib/misc/udhcpd.leases
-EOF
-    udhcpd /etc/udhcpd.conf
-    telnetd -l /bin/sh
-    say "USB network up: telnet 172.16.42.1"
-else
-    say "usb0 not present (NCM unavailable) - use the USB serial port"
+MODE=none
+ACM_TTY=""
+if [ -n "$UDC" ]; then
+    LEG=/sys/bus/gadget/drivers/g_serial
+    if [ "$(cat /sys/class/udc/$UDC/function 2>/dev/null)" = "g_serial" ] && [ -e $LEG/unbind ]; then
+        for d in $LEG/gadget*; do [ -e "$d" ] && echo "$(basename "$d")" > $LEG/unbind; done
+        stage S06 "legacy g_serial unbound (COM port will re-appear as composite device)"
+        sleep 0.5
+    fi
+    if configfs_gadget; then
+        MODE=composite
+        ACM_TTY=ttyGS$(cat $G/functions/acm.usb0/port_num 2>/dev/null || echo 0)
+        stage S06 "configfs ACM+NCM bound to $UDC (serial on /dev/$ACM_TTY)"
+    else
+        stage S06 "configfs bind FAILED - restoring legacy g_serial"
+        for d in /sys/class/udc/$UDC/device/gadget*; do
+            [ -e "$d" ] && echo "$(basename "$d")" > $LEG/bind 2>/dev/null
+        done
+        MODE=legacy; ACM_TTY=ttyGS0
+    fi
 fi
 
-# Status line on the panel every 10 s; never exits (PID 1 must not die)
+# Shell on the USB serial port, respawned
+if [ -n "$ACM_TTY" ]; then
+    ( while true; do
+          [ -e /dev/$ACM_TTY ] && setsid sh -c "exec getty -L -n -l /bin/sh 115200 $ACM_TTY vt100" 2>/dev/null
+          sleep 1
+      done ) &
+    stage S07 "root shell on /dev/$ACM_TTY ($MODE)"
+fi
+
+# USB network
+NET=none
+IF=$(cat $G/functions/ncm.usb0/ifname 2>/dev/null)
+case "$IF" in ''|*unnamed*) IF="" ;; esac
+if [ -n "$IF" ] && ip link show "$IF" >/dev/null 2>&1; then
+    ip addr add 172.16.42.1/24 dev "$IF"
+    ip link set "$IF" up
+    mkdir -p /etc /var/lib/misc && touch /var/lib/misc/udhcpd.leases
+    printf 'start 172.16.42.2\nend 172.16.42.2\ninterface %s\nmax_leases 1\noption subnet 255.255.255.0\nlease_file /var/lib/misc/udhcpd.leases\n' "$IF" > /etc/udhcpd.conf
+    udhcpd /etc/udhcpd.conf
+    telnetd -l /bin/sh
+    NET="$IF 172.16.42.1 (telnet)"
+fi
+stage S08 "network: $NET"
+
+report > /run/x04g-report.txt 2>&1
+stage S09 "report written: /run/x04g-report.txt ($(wc -c < /run/x04g-report.txt) bytes)"
+stage S10 "READY - serial: $MODE/$ACM_TTY, net: $NET, watchdog: $WD"
+
+# Emulator-only self-test (QEMU + dummy_hcd): act as the PC on the host side of the gadget.
+if grep -q 'x04g.selftest=1' /proc/cmdline; then
+    sleep 3
+    HOSTIF=""
+    for d in /sys/class/net/*; do
+        n=$(basename "$d"); [ "$n" = "$IF" ] && continue
+        [ -e "$d/device/driver" ] && readlink "$d/device/driver" | grep -q cdc_ncm && HOSTIF=$n
+    done
+    stage ST1 "host side: tty $(ls /dev/ttyACM* 2>/dev/null) netif ${HOSTIF:-none}"
+    if [ -n "$HOSTIF" ]; then
+        mkdir -p /usr/share/udhcpc
+        printf '#!/bin/sh\n[ "$1" = bound ] && ip addr add "$ip/24" dev "$interface"\nexit 0\n' > /usr/share/udhcpc/default.script
+        chmod +x /usr/share/udhcpc/default.script
+        ip link set "$HOSTIF" up
+        # same kernel owns both addresses: force traffic through the USB link via a netns-free trick
+        udhcpc -i "$HOSTIF" -n -q -t 5 >/dev/null 2>&1
+        stage ST2 "DHCP lease on $HOSTIF: $(ip -4 addr show "$HOSTIF" | awk '/inet /{print $2}')"
+        stage ST3 "NCM carrier: gadget $(cat /sys/class/net/$IF/carrier 2>/dev/null) host $(cat /sys/class/net/$HOSTIF/carrier 2>/dev/null)"
+    fi
+    if [ -e /dev/ttyACM0 ]; then
+        exec 3<>/dev/ttyACM0                       # keep the port open (DTR up) during the test
+        stty -F /dev/ttyACM0 raw -echo 2>/dev/null
+        cat <&3 > /tmp/acm.out &
+        CATPID=$!
+        sleep 1
+        printf '\recho SELFTEST_$((40+2))\r' >&3
+        sleep 2
+        kill $CATPID 2>/dev/null; exec 3>&-
+        R=$(tr -d '\r' < /tmp/acm.out | grep -o 'SELFTEST_42' | head -n1)
+        stage ST4 "ACM shell round-trip: ${R:-NO RESPONSE} (rx $(wc -c < /tmp/acm.out) bytes; shells: $(ps | grep -c '[g]etty\|[s]h -c'))"
+    fi
+    stage ST5 "selftest done"
+fi
+
+# Keep the shell readable: only warnings and our stage lines on the USB console from now on
+echo 5 > /proc/sys/kernel/printk 2>/dev/null
+
+# Heartbeat: proves the system is alive; PID 1 must never exit
 while true; do
-    MEM=$(awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{printf "%d/%d MiB free", a/1024, t/1024}' /proc/meminfo)
-    T=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
-    echo "[x04g] up $(cut -d. -f1 /proc/uptime)s  $MEM  temp ${T:-?}  usb $(cat /sys/class/udc/*/state 2>/dev/null)" > /dev/tty0
     sleep 10
+    MEM=$(awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{printf "%d/%d MiB", a/1024, t/1024}' /proc/meminfo)
+    stage HB "alive, mem $MEM, usb $(cat /sys/class/udc/*/state 2>/dev/null), temp $(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)"
 done

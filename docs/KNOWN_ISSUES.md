@@ -10,7 +10,7 @@
 | 6 | PowerVR GE8300 support in mainline/Mesa unknown | software rendering only | P3 research |
 | 7 | Stock LK requires unlocked seccfg to boot unsigned images | — | **resolved**: your unit is already unlocked (orange state) |
 | 8 | Boot image format expected by LK not yet measured | first boot image may be rejected | resolved by `mkbootimg-from-stock.sh` once `boot.bin` backup exists |
-| 9 | UART is 1.8 V | 3.3 V adapters can damage the SoC | use 1.8 V adapter |
+| 9 | No UART available on the user's setup (and it would be 1.8 V) | early kernel hangs before USB probes stay invisible | USB-only debugging, see USB_DEBUGGING.md; UART optional |
 | 10 | GitHub write access not available from the cloud build session | commits must be pushed from your PC | see DEVELOPMENT_STATUS.md |
 | 11 | Stock runs a 32-bit kernel (`bootopt=…,32N2`); arm64 needs `64N2` | wrong mode = no boot | handled in `mkbootimg-from-stock.sh`; unverified on hardware |
 | 12 | `mt8516.dtsi` reserves `secmon@43000000` / `optee@43200000`, but stock shows that range as normal RAM | a few MiB lost; harmless | upstream, leave as is |
