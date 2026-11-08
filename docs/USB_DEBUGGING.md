@@ -80,3 +80,35 @@ Manual access: PuTTY → Serial → COMy (any baud), or `telnet 172.16.42.1` (en
 | serial shell round-trip over ACM | QEMU + dummy_hcd (emulated) | OK (`SELFTEST_42`) |
 | no-UDC path ends in READY | QEMU (emulated) | OK |
 | Windows enumeration, MUSB on the real SoC | hardware | **not yet tested** |
+
+## Boot checkpoints (no USB, no screen needed)
+
+When even the USB gadget never appears, `patches/kernel/0002` lets the kernel reset the board at
+checkpoint N (PSCI SYSTEM_RESET). `scripts/linux/lk-probes/mk-ckpt-images.sh` builds one image per
+N by patching `x04g_ckpt_cfg.reset_at` (magic `X04GCKPT`) in the Image;
+`scripts/windows/x04g-probe-batch.ps1` boots them unattended and records the reset time.
+Fast reset (≲6 s) = checkpoint reached; ~60 s = not reached (LK watchdog).
+
+| N | Location |
+|---|---|
+| C00 | (separate image) first kernel instruction replaced by a reset: LK decompressed and entered the real kernel |
+| 1 | `start_kernel` entry (head.S, MMU on) |
+| 2 | `setup_arch`: after early fixmap/ioremap |
+| 3 | after `setup_machine_fdt` (DT read) |
+| 4 | after `parse_early_param` |
+| 5 | after `paging_init` |
+| 6 | after `unflatten_device_tree` |
+| 7 | after `setup_arch` |
+| 8 | after `mm_core_init` |
+| 9 | after `sched_init` |
+| 10 | after `init_IRQ` |
+| 11 | after `time_init` |
+| 12 | after `console_init` |
+| 13 | before `rest_init` |
+| 14 | `kernel_init` thread started |
+| 15 | after `smp_init` (secondary CPUs) |
+| 16–23 | before initcall level 0 … 7 (pure, core, postcore, arch, subsys, fs, device, late) |
+| 24 | after `do_basic_setup` (all initcalls done) |
+| 25 | right before executing `/init` |
+
+QEMU check (virt, PSCI via SMC): C01–C25 reset at the expected point, C99 never resets.

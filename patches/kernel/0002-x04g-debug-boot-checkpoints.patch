@@ -1,0 +1,204 @@
+From: X04G_LINUX <noreply@anthropic.com>
+Subject: [PATCH] x04g: debug boot checkpoints with PSCI reset (bring-up aid, no UART)
+
+When checkpoint N is reached and x04g_ckpt_cfg.reset_at == N, reset the board via
+PSCI SYSTEM_RESET. reset_at is 0 by default (no effect); test images patch it in the
+Image (magic "X04GCKPT"). Lets the reset time over USB show how far boot got.
+---
+diff --git a/arch/arm64/kernel/setup.c b/arch/arm64/kernel/setup.c
+index 29c6100f0c..6097c5346f 100644
+--- a/arch/arm64/kernel/setup.c
++++ b/arch/arm64/kernel/setup.c
+@@ -278,6 +278,8 @@ u64 cpu_logical_map(unsigned int cpu)
+ 	return __cpu_logical_map[cpu];
+ }
+ 
++void x04g_ckpt(u32 n);	/* init/main.c */
++
+ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ {
+ 	setup_initial_init_mm(_text, _etext, _edata, _end);
+@@ -288,8 +290,10 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 
+ 	early_fixmap_init();
+ 	early_ioremap_init();
++	x04g_ckpt(2);
+ 
+ 	setup_machine_fdt(__fdt_pointer);
++	x04g_ckpt(3);
+ 
+ 	/*
+ 	 * Initialise the static keys early as they may be enabled by the
+@@ -297,6 +301,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 	 */
+ 	jump_label_init();
+ 	parse_early_param();
++	x04g_ckpt(4);
+ 
+ 	dynamic_scs_init();
+ 
+@@ -332,6 +337,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 	arm64_memblock_init();
+ 
+ 	paging_init();
++	x04g_ckpt(5);
+ 
+ 	acpi_table_upgrade();
+ 
+@@ -340,6 +346,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 
+ 	if (acpi_disabled)
+ 		unflatten_device_tree();
++	x04g_ckpt(6);
+ 
+ 	bootmem_init();
+ 
+diff --git a/init/main.c b/init/main.c
+index 31f2bf5497..20dbf9c211 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -26,6 +26,7 @@
+ #include <linux/delay.h>
+ #include <linux/ioport.h>
+ #include <linux/init.h>
++#include <linux/arm-smccc.h>
+ #include <linux/initrd.h>
+ #include <linux/memblock.h>
+ #include <linux/acpi.h>
+@@ -122,6 +123,8 @@
+ 
+ static int kernel_init(void *);
+ 
++void x04g_ckpt(u32 n);	/* X04G bring-up checkpoints, defined below */
++
+ /*
+  * Debug helper: via this flag we know that we are in 'early bootup code'
+  * where only the boot processor is running with IRQ disabled.  This means
+@@ -1006,7 +1009,9 @@ void start_kernel(void)
+ 	boot_cpu_init();
+ 	page_address_init();
+ 	pr_notice("%s", linux_banner);
++	x04g_ckpt(1);
+ 	setup_arch(&command_line);
++	x04g_ckpt(7);
+ 	mm_core_init_early();
+ 	/* Static keys and static calls are needed by LSMs */
+ 	jump_label_init();
+@@ -1047,6 +1052,7 @@ void start_kernel(void)
+ 	sort_main_extable();
+ 	trap_init();
+ 	mm_core_init();
++	x04g_ckpt(8);
+ 	maple_tree_init();
+ 	poking_init();
+ 	ftrace_init();
+@@ -1060,6 +1066,7 @@ void start_kernel(void)
+ 	 * time - but meanwhile we still have a functioning scheduler.
+ 	 */
+ 	sched_init();
++	x04g_ckpt(9);
+ 
+ 	if (WARN(!irqs_disabled(),
+ 		 "Interrupts were enabled *very* early, fixing it\n"))
+@@ -1092,6 +1099,7 @@ void start_kernel(void)
+ 	/* init some links before init_ISA_irqs() */
+ 	early_irq_init();
+ 	init_IRQ();
++	x04g_ckpt(10);
+ 	tick_init();
+ 	rcu_init_nohz();
+ 	timers_init();
+@@ -1101,6 +1109,7 @@ void start_kernel(void)
+ 	vdso_setup_data_pages();
+ 	timekeeping_init();
+ 	time_init();
++	x04g_ckpt(11);
+ 
+ 	/* This must be after timekeeping is initialized */
+ 	random_init();
+@@ -1125,6 +1134,7 @@ void start_kernel(void)
+ 	 * this. But we do want output early, in case something goes wrong.
+ 	 */
+ 	console_init();
++	x04g_ckpt(12);
+ 	if (panic_later)
+ 		panic("Too many boot %s vars at `%s'", panic_later,
+ 		      panic_param);
+@@ -1187,6 +1197,7 @@ void start_kernel(void)
+ 	kcsan_init();
+ 
+ 	/* Do the rest non-__init'ed, we're now alive */
++	x04g_ckpt(13);
+ 	rest_init();
+ 
+ 	/*
+@@ -1409,6 +1420,29 @@ static int __init ignore_unknown_bootoption(char *param, char *val,
+ 	return 0;
+ }
+ 
++/*
++ * X04G bring-up aid (no UART on the target): when checkpoint N is reached and N equals
++ * x04g_ckpt_cfg.reset_at, reset the board through PSCI SYSTEM_RESET. The reset time seen on
++ * USB tells whether checkpoint N was reached. reset_at is 0 (disabled) in normal builds and is
++ * patched in the Image (magic "X04GCKPT") by scripts/linux/lk-probes/mk-ckpt-images.sh.
++ */
++struct x04g_ckpt_cfg { u32 magic0, magic1, reset_at, pad; };
++__visible volatile struct x04g_ckpt_cfg x04g_ckpt_cfg __section(".data") __aligned(16) = {
++	.magic0 = 0x47343058,	/* "X04G" */
++	.magic1 = 0x54504b43,	/* "CKPT" */
++};
++
++void x04g_ckpt(u32 n)
++{
++	struct arm_smccc_res res;
++
++	if (x04g_ckpt_cfg.reset_at != n)
++		return;
++	arm_smccc_smc(0x84000009, 0, 0, 0, 0, 0, 0, 0, &res);	/* PSCI SYSTEM_RESET */
++	for (;;)
++		cpu_relax();
++}
++
+ static void __init do_initcall_level(int level, char *command_line)
+ {
+ 	initcall_entry_t *fn;
+@@ -1437,6 +1471,7 @@ static void __init do_initcalls(void)
+ 	for (level = 0; level < ARRAY_SIZE(initcall_levels) - 1; level++) {
+ 		/* Parser modifies command_line, restore it each time */
+ 		strcpy(command_line, saved_command_line);
++		x04g_ckpt(16 + level);
+ 		do_initcall_level(level, command_line);
+ 	}
+ 
+@@ -1555,6 +1590,7 @@ static int __ref kernel_init(void *unused)
+ {
+ 	int ret;
+ 
++	x04g_ckpt(14);
+ 	init_userspace_fs();
+ 
+ 	/*
+@@ -1588,6 +1624,7 @@ static int __ref kernel_init(void *unused)
+ 	do_sysctl_args();
+ 
+ 	if (ramdisk_execute_command) {
++		x04g_ckpt(25);
+ 		ret = run_init_process(ramdisk_execute_command);
+ 		if (!ret)
+ 			return 0;
+@@ -1665,6 +1702,7 @@ static noinline void __init kernel_init_freeable(void)
+ 	lockup_detector_init();
+ 
+ 	smp_init();
++	x04g_ckpt(15);
+ 	sched_init_smp();
+ 
+ 	workqueue_init_topology();
+@@ -1673,6 +1711,7 @@ static noinline void __init kernel_init_freeable(void)
+ 	page_alloc_init_late();
+ 
+ 	do_basic_setup();
++	x04g_ckpt(24);
+ 
+ 	kunit_run_all_tests();
+ 

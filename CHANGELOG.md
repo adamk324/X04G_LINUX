@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-08 — LK path fully proven; kernel boot checkpoints
+
+- P4/P4b (smc 0x82000115) and P5 (LK native 64N2 path, gzip'd stub) all reset in ~2.7 s:
+  LK, ATF, 64-bit switch, decompression, DT handling all work. The failure is inside our kernel.
+- patches/kernel/0002: debug checkpoints (PSCI reset at checkpoint N, patched per image).
+- mk-ckpt-images.sh, C00 real-kernel entry probe, x04g-probe-batch.ps1 (unattended runs, CSV).
+
 ## 2026-11-08 — probe results: 32-bit handover works, 64-bit switch is the problem
 
 - P1/P2 reset at 2.8 s (LK runs our image, mainline DT fine); P0 stock reset at 6.5 s;
